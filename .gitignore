@@ -5,6 +5,9 @@ node_modules/
 dist/
 build/
 
+# Vite
+.vite/
+
 # 日志文件
 *.log
 npm-debug.log*

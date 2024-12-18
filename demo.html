@@ -1,0 +1,2657 @@
+
+
+<script>
+    const EVENT_QUANTITY_ADD_BEFORE = 'quantity-add-before';
+    const EVENT_QUANTITY_ADD_AFTER = 'quantity-add-after';
+    const EVENT_QUANTITY_SUB_BEFORE = 'quantity-sub-before';
+    const EVENT_QUANTITY_SUB_AFTER = 'quantity-sub-after';
+
+    const CURRENCY_AUD = 'AUD';
+    const CURRENCY_NZD = 'NZD';
+    const CURRENCY_AUD_SYMBOL = 'A$';
+    const CURRENCY_NZD_SYMBOL = 'NZ$';
+
+    const QUANTITY_OPERATION_ADD = 'add';
+    const QUANTITY_OPERATION_SUB = 'sub';
+
+    const PCIE_FORM_FACTOR_LP = 'LP';
+    const PCIE_FORM_FACTOR_FH = 'FH';
+
+    const RADI_CARD_TYPE_NONE = 'none';
+    const RADI_CARD_TYPE_SAS = 'sas';
+
+    const DRIVE_INTERFACE_SATA = 'SATA';
+    const DRIVE_INTERFACE_SAS = 'SAS';
+    const DRIVE_INTERFACE_NVME = 'NVMe';
+
+    const OPTION_TYPE_RADIO = 'radio';
+    const OPTION_TYPE_CHECKBOX = 'checkbox';
+
+    const SECTION_NAME_REAR_BOOT_DRIVE = 'Rear BootDrive';
+    const SECTION_NAME_M2_BOOT_DRIVE = 'M.2 BootDrive';
+    const SECTION_NAME_HDD = 'HDD';
+    const SECTION_NAME_SSD = 'SSD';
+    const SECTION_NAME_NVME = 'NVMe';
+    const SECTION_NAME_SAS_RAID_CARD = 'SAS Raid Controller';
+    const SECTION_NAME_NVME_RAID_CARD = 'NVMe Raid Controller';
+
+    const ATTRIBUTE_SET_NAME_BAREBONE = 'Barebone';
+    const ATTRIBUTE_SET_NAME_CHASSIS = 'Chassis';
+    const ATTRIBUTE_SET_NAME_MOTHERBOARD = 'Motherboard';
+
+    const ATTRIBUTE_SET_NAME_CPU = 'CPU';
+    const ATTRIBUTE_SET_NAME_RAM = 'RAM';
+    const ATTRIBUTE_SET_NAME_DRIVE = 'Data Storage Drives';
+    const ATTRIBUTE_SET_NAME_AOC_GPU = 'AOC - GPU';
+    const ATTRIBUTE_SET_NAME_AOC_NIC = 'AOC-NIC';
+
+    const SECTION_CATEGORY_NAME_CACHE_VAULT = 'CacheVault';
+
+    const COMPONENT_MEMOS = [];
+    const MAX_COMPONENT_MEMOS = 100;
+
+    const QUANTITY_CANNOT_BE_LESS_THAN_ZERO = 'Quantity cannot be less than 0';
+
+    const LOCAL_STORAGE_KEY_BOM_AFTER_ADD_TO_CART = 'bom_after_add_to_cart';
+
+    document.addEventListener('alpine:init', () => {
+        Alpine.store('BomStore', {
+            isInAdmin: <?= $isInAdmin ? 'true' : 'false' ?>,
+
+            isInBomProductPage: <?= $isInBomProductPage ? 'true' : 'false' ?>,
+
+            quantity: <?= $quantity ?>,
+
+            loading: true,
+
+            bom: undefined,
+
+            /**
+             * Set BOM data
+             *
+             * @param plainBom
+             */
+            setBom(plainBom) {
+
+                clearComponentMemos();
+
+                createComponentMemo(plainBom);
+
+                this.bom = preprocessPlainBom(plainBom);
+
+                console.log('Plain BOM stored to Alpine BomStore:', this.bom);
+            },
+
+            /**
+             * Update BOM by ID
+             *
+             * @param bomId
+             * @returns {Promise<void>}
+             */
+            async updateBomById(bomId) {
+                this.loading = true;
+
+                try {
+                    this.setBom(
+                        await this.fetchBom(bomId)
+                    );
+                } finally {
+                    this.loading = false;
+                }
+            },
+
+            /**
+             * Fetch BOM by ID
+             *
+             * @param bomId
+             * @returns {Promise<any>}
+             */
+            async fetchBom(bomId) {
+                const response = await fetch(`/bom/bom/detail/bom_id/${bomId}`);
+
+                return await response.json();
+            },
+
+            selectWarranty(warrantyId) {
+                this.warranties.forEach(warranty => {
+                    warranty.is_checked = (warranty.warranty_id === warrantyId);
+                });
+            },
+
+            /**
+             * Determine if a sku is salable
+             *
+             * @param {boolean} isInStock
+             * @param {boolean} isBackorder
+             * @param {number} stockQuantity
+             * @param {number} totalQuantityToBuy
+             * @returns {boolean}
+             */
+            determineIsSalable(isInStock, isBackorder, stockQuantity, totalQuantityToBuy) {
+                if (!isInStock) {
+                    return false;
+                }
+
+                if (isBackorder) {
+                    return true;
+                }
+
+                return stockQuantity >= totalQuantityToBuy
+            },
+
+            // All Parent
+            get parentSections() {
+                return this.bom.sections.filter(section => isParentSection(section));
+            },
+            // All Child
+            get childSections() {
+                return this.bom.sections.filter(section => !isParentSection(section));
+            },
+            // Main part
+            get bareboneSection() {
+                return this.bom.sections.find(section => section.attribute_set_name === ATTRIBUTE_SET_NAME_BAREBONE);
+            },
+            get chassisSection() {
+                return this.bom.sections.find(section => section.attribute_set_name === ATTRIBUTE_SET_NAME_CHASSIS);
+            },
+            get motherboardSection() {
+                return this.bom.sections.find(section => section.attribute_set_name === ATTRIBUTE_SET_NAME_MOTHERBOARD);
+            },
+            get readOnlySections() {
+                return [this.bareboneSection, this.chassisSection, this.motherboardSection].filter(section => section !== undefined && section !== null);
+            },
+            // Boot Drive
+            get rearBootDriveSection() {
+                return this.bom.sections.find(section => section.name === SECTION_NAME_REAR_BOOT_DRIVE);
+            },
+            get m2BootDriveSection() {
+                return this.bom.sections.find(section => section.name === SECTION_NAME_M2_BOOT_DRIVE);
+            },
+            get bootDriveSections() {
+                return [this.rearBootDriveSection, this.m2BootDriveSection].filter(section => section !== undefined && section !== null);
+            },
+            // Radio
+            get cpuSections() {
+                return this.bom.sections.filter(section => section.attribute_set_name === ATTRIBUTE_SET_NAME_CPU);
+            },
+            get ramSections() {
+                return this.bom.sections.filter(section => section.attribute_set_name === ATTRIBUTE_SET_NAME_RAM);
+            },
+            // Storage Drive
+            get hddSection() {
+                return this.bom.sections.find(section => section.name === SECTION_NAME_HDD);
+            },
+            get ssdSection() {
+                return this.bom.sections.find(section => section.name === SECTION_NAME_SSD);
+            },
+            get nvmeSection() {
+                return this.bom.sections.find(section => section.name === SECTION_NAME_NVME);
+            },
+            get storageDriveSections() {
+                return [this.hddSection, this.ssdSection, this.nvmeSection].filter(section => section !== undefined && section !== null);
+            },
+            // Raid Card
+            get sasRaidCardSection() {
+                return this.bom.sections.find(section => section.name === SECTION_NAME_SAS_RAID_CARD);
+            },
+            get nvmeRaidCardSection() {
+                return this.bom.sections.find(section => section.name === SECTION_NAME_NVME_RAID_CARD);
+            },
+            // BBU
+            get cacheVaultSection() {
+                return this.bom.sections.find(section => section.category_name === SECTION_CATEGORY_NAME_CACHE_VAULT);
+            },
+            // AOC
+            get gpuSection() {
+                return this.bom.sections.find(section => section.attribute_set_name === ATTRIBUTE_SET_NAME_AOC_GPU);
+            },
+            get nicSection() {
+                return this.bom.sections.find(section => section.attribute_set_name === ATTRIBUTE_SET_NAME_AOC_NIC);
+            },
+            get aocSections() {
+                return [this.gpuSection, this.nicSection].filter(section => section !== undefined && section !== null);
+            },
+            // Other normal sections
+            get normalSections() {
+                const excludedSections = [
+                    this.bareboneSection,
+                    this.chassisSection,
+                    this.motherboardSection,
+                    this.rearBootDriveSection,
+                    this.m2BootDriveSection,
+                    ...this.cpuSections,
+                    ...this.ramSections,
+                    this.hddSection,
+                    this.ssdSection,
+                    this.nvmeSection,
+                    this.sasRaidCardSection,
+                    this.nvmeRaidCardSection,
+                    this.cacheVaultSection,
+                    this.gpuSection,
+                    this.nicSection
+                ].filter(section => section !== undefined && section !== null);
+
+                return this.bom.sections.filter(section => !excludedSections.includes(section));
+            },
+            // Other normal parent sections
+            get normalParentSections() {
+                return this.normalSections.filter(section => isParentSection(section));
+            },
+            get selectedComponents() {
+                const result = [];
+                const accessoriesComponents = [];
+
+                const collectComponent = (sections) => {
+                    for (const section of sections) {
+                        const selectedComponents = [];
+
+                        for (const group of section.groups) {
+                            for (const component of group.components) {
+                                if (component.quantity > 0) {
+                                    selectedComponents.push({
+                                        sku: component.sku,
+                                        description: component.description,
+                                        price: component.price,
+                                        is_hardware: component.is_hardware,
+                                        tire_price_code: component.tire_price_code,
+                                        quantity: component.quantity,
+                                        is_in_stock: component.is_in_stock,
+                                        is_backorder: component.is_backorder,
+                                        stock_quantity: component.stock_quantity,
+                                        component_type: component.component_type
+                                    });
+
+                                    if (component.accessories) {
+                                        for (const accessory of component.accessories) {
+                                            accessoriesComponents.push({
+                                                sku: accessory.sku,
+                                                description: accessory.description,
+                                                price: accessory.price,
+                                                is_hardware: accessory.is_hardware,
+                                                tire_price_code: accessory.tire_price_code,
+                                                quantity: accessory.quantity * component.quantity,
+                                                is_in_stock: accessory.is_in_stock,
+                                                is_backorder: accessory.is_backorder,
+                                                stock_quantity: accessory.stock_quantity,
+                                                component_type: accessory.component_type
+                                            });
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        if (selectedComponents.length > 0) {
+                            result.push({
+                                section_name: section.name,
+                                components: selectedComponents
+                            });
+                        }
+                    }
+                };
+
+                collectComponent(this.readOnlySections);
+                collectComponent(this.cpuSections);
+                collectComponent(this.ramSections);
+                collectComponent(this.bootDriveSections);
+                collectComponent(this.storageDriveSections);
+
+                if (this.sasRaidCardSection) {
+                    collectComponent([this.sasRaidCardSection]);
+                }
+                if (this.nvmeRaidCardSection) {
+                    collectComponent([this.nvmeRaidCardSection]);
+                }
+                if (this.cacheVaultSection) {
+                    collectComponent([this.cacheVaultSection]);
+                }
+                collectComponent(this.aocSections);
+                collectComponent(this.normalSections);
+
+                if (this.bom.bom_accessories) {
+                    for (const accessory of this.bom.bom_accessories) {
+                        accessoriesComponents.push({
+                            sku: accessory.sku,
+                            description: accessory.description,
+                            price: accessory.price,
+                            is_hardware: accessory.is_hardware,
+                            tire_price_code: accessory.tire_price_code,
+                            is_in_stock: accessory.is_in_stock,
+                            quantity: accessory.quantity,
+                            is_backorder: accessory.is_backorder,
+                            stock_quantity: accessory.stock_quantity,
+                            component_type: accessory.component_type
+                        });
+                    }
+                }
+
+                if (accessoriesComponents.length > 0) {
+                    result.push({
+                        section_name: 'Accessory',
+                        components: accessoriesComponents
+                    });
+                }
+
+                return result;
+            },
+            get componentPrice() {
+                return this.selectedComponents.reduce((carry, section) => {
+                    return carry + section.components.reduce((carry, component) => {
+                        return carry + component.price * component.quantity;
+                    }, 0);
+                }, 0);
+            },
+            get componentPriceFormula() {
+                const formulaParts = this.selectedComponents.flatMap(section => {
+                    return section.components.map(component => {
+                        const {sku, price, quantity} = component;
+                        const itemTotal = (price * quantity).toFixed(4);
+                        return `  ${sku}: ${quantity} * ${price.toFixed(4)} = ${itemTotal}`;
+                    });
+                });
+
+                const total = formulaParts.reduce((sum, item) => {
+                    const match = item.match(/= (\d+\.\d+)/);
+                    return sum + (match ? parseFloat(match[1]) : 0);
+                }, 0);
+
+                const formulaCalculation = this.selectedComponents.flatMap(section => {
+                    return section.components.map(component => {
+                        const {price, quantity} = component;
+                        return `${quantity} * ${price.toFixed(4)}`;
+                    });
+                }).join(' + ');
+
+                return [
+                    `ComponentPrice(hardware and software): ${total.toFixed(4)}`,
+                    ...formulaParts,
+                    `Formula: ${formulaCalculation} = ${total.toFixed(4)}`
+                ].join('\n');
+            },
+            get hardwarePrice() {
+                return this.selectedComponents.reduce((carry, section) => {
+                    return carry + section.components.reduce((carry, component) => {
+                        if (component.is_hardware) {
+                            return carry + component.price * component.quantity;
+                        }
+                        return carry;
+                    }, 0);
+                }, 0);
+            },
+            get hardwarePriceFormula() {
+                const formulaParts = this.selectedComponents.flatMap(section => {
+                    return section.components.map(component => {
+                        if (component.is_hardware) {
+                            const {sku, price, quantity} = component;
+                            const itemTotal = (price * quantity).toFixed(4);
+                            return `  ${sku}: ${quantity} * ${price.toFixed(4)} = ${itemTotal}`;
+                        }
+                        return null;
+                    });
+                }).filter(item => item !== null);
+
+                const total = formulaParts.reduce((sum, item) => {
+                    const match = item.match(/= (\d+\.\d+)/);
+                    return sum + (match ? parseFloat(match[1]) : 0);
+                }, 0);
+
+                const formulaCalculation = this.selectedComponents.flatMap(section => {
+                    return section.components.map(component => {
+                        if (component.is_hardware) {
+                            const {price, quantity} = component;
+                            return `${quantity} * ${price.toFixed(4)}`;
+                        }
+                        return null;
+                    });
+                }).filter(item => item !== null).join(' + ');
+
+                return [
+                    `HardwarePrice: ${total.toFixed(4)}`,
+                    ...formulaParts,
+                    `Formula: ${formulaCalculation} = ${total.toFixed(4)}`
+                ].join('\n');
+            },
+            get softwarePrice() {
+                return this.selectedComponents.reduce((carry, section) => {
+                    return carry + section.components.reduce((carry, component) => {
+                        if (!component.is_hardware) {
+                            return carry + component.price * component.quantity;
+                        }
+                        return carry;
+                    }, 0);
+                }, 0);
+            },
+            get softwarePriceFormula() {
+                const formulaParts = this.selectedComponents.flatMap(section => {
+                    return section.components.map(component => {
+                        if (!component.is_hardware) {
+                            const {sku, price, quantity} = component;
+                            const itemTotal = (price * quantity).toFixed(4);
+                            return `  ${sku}: ${quantity} * ${price.toFixed(4)} = ${itemTotal}`;
+                        }
+                        return null;
+                    });
+                }).filter(item => item !== null);
+
+                const total = formulaParts.reduce((sum, item) => {
+                    const match = item.match(/= (\d+\.\d+)/);
+                    return sum + (match ? parseFloat(match[1]) : 0);
+                }, 0);
+
+                const formulaCalculation = this.selectedComponents.flatMap(section => {
+                    return section.components.map(component => {
+                        if (!component.is_hardware) {
+                            const {price, quantity} = component;
+                            return `${quantity} * ${price.toFixed(4)}`;
+                        }
+                        return null;
+                    });
+                }).filter(item => item !== null).join(' + ');
+
+                return [
+                    `SoftwarePrice: ${total.toFixed(4)}`,
+                    ...formulaParts,
+                    `Formula: ${formulaCalculation} = ${total.toFixed(4)}`
+                ].join('\n');
+            },
+            get assemblyPrice() {
+                return Math.max(this.componentPrice * this.bom.assembly_rate, this.bom.min_assembly_cost) / (1 - this.bom.gp);
+            },
+            get assemblyPriceFormula() {
+                const formula = `max(${this.componentPrice.toFixed(4)} * ${this.bom.assembly_rate}, ${this.bom.min_assembly_cost}) / (1 - ${this.bom.gp}) = max(${(this.componentPrice * this.bom.assembly_rate).toFixed(4)}, ${this.bom.min_assembly_cost}) / ${(1 - this.bom.gp).toFixed(2)}`;
+
+                return `AssemblyPrice: ${(Math.max(
+                    this.componentPrice * this.bom.assembly_rate,
+                    this.bom.min_assembly_cost
+                ) / (1 - this.bom.gp)).toFixed(4)}\nFormula: max(ComponentPrice * AssemblyRate, MinAssemblyCost) / (1 - GP) = ${formula} = ${(Math.max(
+                    this.componentPrice * this.bom.assembly_rate,
+                    this.bom.min_assembly_cost
+                ) / (1 - this.bom.gp)).toFixed(4)}`;
+            },
+            get warrantyPrice() {
+                return this.hardwarePrice * this.selectedWarranty.percentage / (1 - this.bom.gp);
+            },
+            get warrantyPriceFormula() {
+                const formula = `${this.hardwarePrice.toFixed(4)} * ${this.selectedWarranty.percentage} / (1 - ${this.bom.gp}) = ${(this.hardwarePrice * this.selectedWarranty.percentage / (1 - this.bom.gp)).toFixed(4)}`;
+
+                return `WarrantyPrice: ${(this.hardwarePrice * this.selectedWarranty.percentage / (1 - this.bom.gp)).toFixed(4)}\nFormula: HardwarePrice * WarrantyPercentage / (1 - GP) = ${formula}`;
+            },
+            get unitPrice() {
+                return this.componentPrice + this.assemblyPrice + this.warrantyPrice;
+            },
+            get unitPriceFormula() {
+                const formula = `${this.componentPrice} + ${this.assemblyPrice} + ${this.warrantyPrice} = ${this.componentPrice + this.assemblyPrice + this.warrantyPrice}`;
+
+                return [
+                    `TotalUnitPrice: ${this.componentPrice + this.assemblyPrice + this.warrantyPrice}`,
+                    `  ComponentPrice: ${this.componentPrice}`,
+                    `  AssemblyPrice: ${this.assemblyPrice}`,
+                    `  WarrantyPrice: ${this.warrantyPrice}`,
+                    `Formula: ComponentPrice + AssemblyPrice + WarrantyPrice = ${formula}`
+                ].join('\n');
+            },
+            get totalPrice() {
+                return this.unitPrice * this.quantity;
+            },
+            get currencySymbol() {
+                if (this.bom.currency === CURRENCY_AUD) {
+                    return CURRENCY_AUD_SYMBOL;
+                }
+
+                if (this.bom.currency === CURRENCY_NZD) {
+                    return CURRENCY_NZD_SYMBOL;
+                }
+
+                throw new Error('Currency symbol not supported');
+            },
+            get selectedWarranty() {
+                return this.bom.warranties.find(warranty => warranty.sku === this.bom.warranty_sku);
+            },
+        });
+    });
+
+    /**
+     * Create component memo
+     * @param plainBom
+     * @returns {number}
+     */
+    function createComponentMemo(plainBom) {
+        const previousMemo = COMPONENT_MEMOS[COMPONENT_MEMOS.length - 1] || null;
+        const currentVersion = previousMemo ? previousMemo.version + 1 : 0;
+
+        if (COMPONENT_MEMOS.length >= MAX_COMPONENT_MEMOS) {
+            COMPONENT_MEMOS.shift();
+        }
+
+        const components = plainBom.sections.reduce((carry, section) => {
+            return carry.concat(section.groups.reduce((carry, group) => {
+                return carry.concat(group.components.map(component => {
+                    return {
+                        identifier: component.identifier,
+                        quantity: component.quantity
+                    };
+                }));
+            }, []));
+        }, []);
+
+        COMPONENT_MEMOS.push({
+            version: currentVersion,
+            components: components
+        });
+
+        const minVersion = COMPONENT_MEMOS[0].version;
+        const maxVersion = COMPONENT_MEMOS[COMPONENT_MEMOS.length - 1].version;
+
+        console.log(`Component memo version ${currentVersion} created. Versions: [${minVersion} - ${maxVersion}]`);
+
+        return currentVersion;
+    }
+
+    /**
+     * Clear component memos
+     */
+    function clearComponentMemos() {
+        console.log('Clear component memos');
+        COMPONENT_MEMOS.length = 0;
+    }
+
+    /**
+     * Preprocess plain BOM data
+     * @param plainBom
+     * @returns {*} plainBom
+     */
+    function preprocessPlainBom(plainBom) {
+        for (const section of plainBom.sections) {
+            section.is_radio = section.option_type === OPTION_TYPE_RADIO;
+            section.is_checkbox = section.option_type === OPTION_TYPE_CHECKBOX;
+            section.identifier = generateSectionIdentifier(section);
+
+            for (const group of section.groups) {
+                group.identifier = generateGroupIdentifier(section, group);
+                for (const component of group.components) {
+                    component.identifier = generateComponentIdentifier(section, group, component);
+                }
+            }
+        }
+
+        return plainBom;
+    }
+
+    /**
+     * Show quantity operation tooltip
+     * @param componentIdentifier
+     * @param result
+     * @param buttonRectBottom
+     * @param scrollableRectBottom
+     * @param operation
+     */
+    function showQuantityOperationTooltip(componentIdentifier, result, buttonRectBottom, scrollableRectBottom, operation) {
+        const tooltip = document.getElementById(
+            generateQuantityButtonTooltipId(componentIdentifier, operation)
+        );
+        const message = document.getElementById(
+            generateQuantityButtonTooltipMessageId(componentIdentifier, operation)
+        );
+        const arrow = document.getElementById(
+            generateQuantityButtonTooltipArrowId(componentIdentifier, operation)
+        );
+
+        tooltip.style.display = 'block';
+        message.innerText = result.message;
+
+        if (scrollableRectBottom - buttonRectBottom < 90) {
+            // Button is near the bottom, align tooltip to the bottom
+            tooltip.style.top = 'auto';
+            tooltip.style.bottom = '-5px';
+
+            // Align arrow at the bottom
+            arrow.style.top = 'auto';
+            arrow.style.bottom = '10px';
+        } else {
+            // Other cases, align arrow at the top
+            tooltip.style.top = '-5px';
+            tooltip.style.bottom = 'auto';
+
+            // Align arrow at the top
+            arrow.style.top = '10px';
+            arrow.style.bottom = 'auto';
+        }
+    }
+
+    /**
+     * Hide quantity operation tooltip
+     * @param componentIdentifier
+     * @param operation
+     */
+    function hideQuantityOperationTooltip(componentIdentifier, operation) {
+        const tooltip = document.getElementById(
+            generateQuantityButtonTooltipId(componentIdentifier, operation)
+        );
+        const message = document.getElementById(
+            generateQuantityButtonTooltipMessageId(componentIdentifier, operation)
+        );
+
+        tooltip.style.display = 'none';
+        message.innerText = '';
+    }
+
+    /**
+     * Generate component identifier
+     * @param section
+     * @param group
+     * @param component
+     * @returns {string}
+     */
+    function generateComponentIdentifier(section, group, component) {
+        return `${section.section_id}_${group.group_id}_${component.component_id}`;
+    }
+
+    /**
+     * Generate group identifier
+     * @param section
+     * @param group
+     * @returns {string}
+     */
+    function generateGroupIdentifier(section, group) {
+        return `${section.section_id}_${group.group_id}`;
+    }
+
+    /**
+     * Generate section identifier
+     * @param section
+     * @returns {string}
+     */
+    function generateSectionIdentifier(section) {
+        return `${section.section_id}`;
+    }
+
+    /**
+     * Generate quantity button id
+     * @param componentIdentifier
+     * @param operation {QUANTITY_OPERATION_SUB|QUANTITY_OPERATION_ADD}
+     * @returns {string}
+     */
+    function generateQuantityButtonId(componentIdentifier, operation) {
+        return `${componentIdentifier}_${operation}_button`;
+    }
+
+    /**
+     * Generate quantity select id
+     * @param componentIdentifier
+     * @returns {string}
+     */
+    function generateQuantitySelectId(componentIdentifier) {
+        return `${componentIdentifier}_select`;
+    }
+
+    /**
+     * Generate quantity button tooltip id
+     * @param componentIdentifier
+     * @param operation {QUANTITY_OPERATION_SUB|QUANTITY_OPERATION_ADD}
+     * @returns {string}
+     */
+    function generateQuantityButtonTooltipId(componentIdentifier, operation) {
+        return `${componentIdentifier}_${operation}_tooltip`;
+    }
+
+    /**
+     * Generate quantity button tooltip arrow id
+     * @param componentIdentifier
+     * @param operation {QUANTITY_OPERATION_SUB|QUANTITY_OPERATION_ADD}
+     * @returns {string}
+     */
+    function generateQuantityButtonTooltipArrowId(componentIdentifier, operation) {
+        return `${componentIdentifier}_${operation}_tooltip_arrow`;
+    }
+
+    /**
+     * Generate quantity button tooltip message id
+     * @param componentIdentifier
+     * @param operation {QUANTITY_OPERATION_SUB|QUANTITY_OPERATION_ADD}
+     * @returns {string}
+     */
+    function generateQuantityButtonTooltipMessageId(componentIdentifier, operation) {
+        return `${componentIdentifier}_${operation}_tooltip_message`;
+    }
+
+    /**
+     * Generate scrollable section id
+     * @param section
+     * @returns {string}
+     */
+    function generateScrollableGroupsContainerId(section) {
+        return `${section.section_id}_scrollable_container`
+    }
+
+    /**
+     * Helper function to determine if a section is a parent section
+     * @param section
+     * @returns {boolean}
+     */
+    function isParentSection(section) {
+        return (section.parent_id || null) === null;
+    }
+
+    /**
+     * Helper function to determine if a section is a child section
+     * @param section
+     * @returns {boolean}
+     */
+    function isChildSection(section) {
+        return !isParentSection(section);
+    }
+
+    /**
+     * Helper function to console log with red text
+     * @param text
+     */
+    function consoleLogRedText(text) {
+        consoleLogWithStyle(text, 'color: red;');
+    }
+
+    /**
+     * Helper function to console log with green text
+     * @param text
+     */
+    function consoleLogGreenText(text) {
+        consoleLogWithStyle(text, 'color: green;');
+    }
+
+    /**
+     * Helper function to console log with bold text
+     * @param text
+     */
+    function consoleLogBoldText(text) {
+        consoleLogWithStyle(text, 'font-weight: bold;');
+    }
+
+    /**
+     * Helper function to console log with style
+     * @param text
+     * @param style
+     */
+    function consoleLogWithStyle(text, style) {
+        console.log(`%c${text}`, style);
+    }
+
+    /**
+     * Helper function to get the first component of a section
+     * @param section
+     * @returns {*}
+     */
+    function getFirstComponent(section) {
+        const groups = section.groups || [];
+        if (groups.length === 0) {
+            throw new Error(`Section ${section.name} does not have any groups`);
+        }
+
+        const firstGroup = groups[0];
+
+        const components = firstGroup.components || [];
+        if (components.length === 0) {
+            throw new Error(`Section ${section.name} does not have any components`);
+        }
+
+        return components[0];
+    }
+
+    /**
+     * Helper function to get component attribute
+     * @param component
+     * @param attributeCode
+     * @returns {number|string}
+     */
+    function getComponentAttribute(component, attributeCode) {
+        const attributes = component.attributes || [];
+
+        const attribute = attributes.find(attribute => attribute.attribute_code === attributeCode);
+
+        if (!attribute) {
+            throw new Error(`Attribute ${attributeCode} not found for component ${component.sku}`);
+        }
+
+        // if (typeof attribute.value === 'string') {
+        //     return attribute.value.toLowerCase();
+        // }
+
+        return attribute.value;
+    }
+
+    /**
+     * Helper function to get component attribute as number
+     * @param section
+     * @param excludeComponent
+     * @returns {[]}
+     */
+    function getOtherComponentsInSameSection(section, excludeComponent) {
+        return section.groups.reduce((carry, group) => {
+            return carry.concat(group.components.filter(c => c !== excludeComponent));
+        }, []);
+    }
+
+    /**
+     * Helper function to get section lower quantity limit
+     * @param section
+     * @returns {number}
+     */
+    function getSectionQuantityLowerLimit(section) {
+        return section.min;
+    }
+
+    /**
+     * Helper function to get section upper quantity limit
+     * @param section
+     * @returns {number}
+     */
+    function getSectionQuantityUpperLimit(section) {
+        return section.max;
+    }
+
+    /**
+     * Helper function to get section progress bar suffix
+     * @param section
+     * @returns {string|null}
+     */
+    function getSectionProgressBarSuffix(section) {
+        if (section.name === SECTION_NAME_HDD) {
+            return 'HDDs';
+        }
+        if (section.name === SECTION_NAME_SSD) {
+            return 'SSDs';
+        }
+        if (section.name === SECTION_NAME_NVME) {
+            return 'NVMes';
+        }
+        if (section.attribute_set_name === ATTRIBUTE_SET_NAME_AOC_GPU) {
+            return 'GPUs';
+        }
+        if (section.attribute_set_name === ATTRIBUTE_SET_NAME_AOC_NIC) {
+            return 'NICs';
+        }
+        return null;
+    }
+
+    /**
+     * Helper function to calculate the total quantity of selected components in a section
+     * @param section
+     * @returns {number}
+     */
+    function calculateSectionSelectedQuantity(section) {
+        return section.groups.reduce((carry, group) => {
+            return carry + group.components.reduce((carry, component) => {
+                return carry + component.quantity;
+            }, 0);
+        }, 0);
+    }
+
+    /**
+     * Helper function to calculate the available quantity of a section
+     * @param section
+     * @returns {number}
+     */
+    function calculateSectionAvailableQuantity(section) {
+        return getSectionQuantityUpperLimit(section) - calculateSectionSelectedQuantity(section);
+    }
+
+    /**
+     * Helper function to calculate the total count of components in a section
+     * @param section
+     * @returns {number}
+     */
+    function calculateSectionComponentCount(section) {
+        return section.groups.reduce((carry, group) => {
+            return carry + group.components.length;
+        }, 0);
+    }
+
+    /**
+     * Helper function to force set quantity to 0 for components
+     * @param components
+     */
+    function forceSetQuantityToZeroForComponents(components) {
+        if (!Array.isArray(components)) {
+            components = [components];
+        }
+
+        components.forEach(component => {
+            component.quantity = 0
+            console.log(`Set quantity of ${component.sku} to 0`);
+        });
+    }
+
+    /**
+     * Helper function to find parent section
+     * @param childSection
+     * @param parentSections
+     * @returns {[]}
+     */
+    function findParentSection(childSection, parentSections) {
+        return parentSections.find(parent => parent.section_id === childSection.parent_id);
+    }
+
+    /**
+     * Helper function to find child sections
+     * @param parentSection
+     * @param childSections
+     * @returns {[]}
+     */
+    function findChildSections(parentSection, childSections) {
+        return childSections.filter(child => child.parent_id === parentSection.section_id);
+    }
+
+    /**
+     * Helper function to determine if a child section should be shown
+     * @param parentSection
+     * @param childSection
+     * @returns {boolean}
+     */
+    function determineShowChildSection(parentSection, childSection) {
+        console.log('Determining showChildSection:', parentSection.name, childSection);
+
+        if (calculateSectionSelectedQuantity(parentSection) > 0) {
+            return true;
+        }
+
+        if (calculateSectionSelectedQuantity(childSection) > 0) {
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * Helper function to determine if a parent section has child sections
+     * @param parentSection
+     * @returns {boolean}
+     */
+    function determineHasChildSections(parentSection) {
+        return parentSection.children_ids.length > 0;
+    }
+
+    /**
+     * Helper function to generate quantity option values
+     * @param min
+     * @param step
+     * @param max
+     * @returns {[]}
+     */
+    function generateQuantityOptionValues(min, step, max) {
+        const options = [];
+        for (let i = min; i <= max; i += step) {
+            options.push(i);
+        }
+
+        return options;
+    }
+
+    /**
+     * Helper function to get component extra in infos
+     * @param component
+     * @returns {[]}
+     */
+    function getComponentExtraInInfos(component) {
+        const attributes = component.attributes || [];
+
+        return attributes;
+    }
+
+    /**
+     * Helper function to convert PCIE speed attribute to number
+     * @param speedAttribute
+     * @returns {number}
+     */
+    function parsePcieSpeed(speedAttribute) {
+        const secondPart = speedAttribute.split('PCIe x')[1];
+
+        if (!secondPart) {
+            throw new Error(`Invalid PCIe speed attribute ${speedAttribute}`);
+        }
+
+        const number = parseInt(secondPart);
+
+        if (isNaN(number)) {
+            throw new Error(`Invalid PCIe speed attribute ${speedAttribute}`);
+        }
+
+        return number;
+    }
+
+    function setupBom() {
+        return {
+            blockExpandedStatus: undefined,
+
+            allBlocksExpandedStatus: true,
+
+            pcieSlotUsages: undefined,
+
+            init() {
+                console.groupCollapsed('Init BOM configurator');
+
+                Alpine.store('BomStore').loading = true;
+
+                const plainBomFromServer = <?= $serializedBom ?>;
+
+                let useServerPlainBom = true;
+
+                try {
+                    const plainBomFromLocalStorage = JSON.parse(
+                        localStorage.getItem(LOCAL_STORAGE_KEY_BOM_AFTER_ADD_TO_CART)
+                    );
+
+                    if (
+                        plainBomFromLocalStorage &&
+                        plainBomFromLocalStorage.bom_id === plainBomFromServer.bom_id &&
+                        plainBomFromLocalStorage.updated_at === plainBomFromServer.updated_at
+                    ) {
+                        console.log('Set plain BOM from local storage:', plainBomFromLocalStorage);
+                        Alpine.store('BomStore').setBom(plainBomFromLocalStorage);
+                        useServerPlainBom = false;
+                    }
+                } catch (e) {
+                    console.log('Failed to set plain BOM from local storage:', e);
+                    consoleLogGreenText("Don't worry. Will try to set plain BOM from server again");
+                } finally {
+                    localStorage.removeItem(LOCAL_STORAGE_KEY_BOM_AFTER_ADD_TO_CART);
+                }
+
+                if (useServerPlainBom) {
+                    console.log('Set plain BOM from server:', plainBomFromServer);
+                    Alpine.store('BomStore').setBom(plainBomFromServer);
+
+                    // If set plain BOM from server and in BOM product page, need to auto select/unselect first SAS Raid Card
+                    if (this.isInBomProductPage) {
+                        this.updateFirstSasRaidCardSelectedStatus();
+                    }
+                }
+
+                this.initBlockExpandedStatus();
+
+                this.initPcieSlotUsages();
+
+                this.$nextTick(() => {
+                    Alpine.store('BomStore').loading = false;
+                });
+
+                console.groupEnd();
+            },
+
+            /**
+             * Initialize block expanded status
+             */
+            initBlockExpandedStatus() {
+                const defaultStatus = this.allBlocksExpandedStatus;
+
+                this.blockExpandedStatus = {
+                    'Storage': defaultStatus,
+                    'AOC': defaultStatus,
+                    'Warranty': defaultStatus,
+                };
+
+                for (const section of Alpine.store('BomStore').bom.sections) {
+                    this.blockExpandedStatus[section.name] = defaultStatus;
+                }
+
+                for (const collection of this.normalSectionCollections) {
+                    this.blockExpandedStatus[collection.name] = defaultStatus;
+                }
+            },
+
+            /**
+             * Update first SAS Raid Card selected status
+             */
+            updateFirstSasRaidCardSelectedStatus() {
+                if (!this.sasRaidCardSection) {
+                    return;
+                }
+
+                if (this.onboardRaidCard === RADI_CARD_TYPE_SAS) {
+                    return;
+                }
+
+                console.log('Try update first SAS Raid Card selected status');
+                console.log(`Selected SATA Storage Drive Count: ${this.selectedSataStorageDriveCount}`);
+                console.log(`Selected SAS Storage Drive Count : ${this.selectedSasStorageDriveCount}`);
+
+                if (this.selectedSataStorageDriveCount <= 8 && this.selectedSasStorageDriveCount === 0) {
+                    try {
+                        console.log('Try to unselect first SAS Raid Card');
+                        const firstGroup = this.sasRaidCardSection.groups[0];
+                        const firstSasRaidCard = firstGroup.components[0];
+
+                        if (firstSasRaidCard.quantity > 0) {
+                            this.updateQuantity(
+                                {
+                                    component: firstSasRaidCard,
+                                    group: firstGroup,
+                                    section: this.sasRaidCardSection
+                                },
+                                0
+                            );
+                        }
+                    } catch (e) {
+                        console.log('Unselect first SAS Raid Card failed', e);
+                    }
+                }
+
+                if (this.selectedSataStorageDriveCount > 8 || this.selectedSasStorageDriveCount > 0) {
+                    try {
+                        console.log('Try to select first SAS Raid Card');
+                        const firstGroup = this.sasRaidCardSection.groups[0];
+                        const firstSasRaidCard = firstGroup.components[0];
+
+                        if (firstSasRaidCard.quantity === 0) {
+                            this.updateQuantity(
+                                {
+                                    component: firstSasRaidCard,
+                                    group: firstGroup,
+                                    section: this.sasRaidCardSection
+                                },
+                                1
+                            );
+                        }
+                    } catch (e) {
+                        console.log('Select first SAS Raid Card failed', e);
+                    }
+                }
+            },
+
+            /**
+             * Initialize PCIe slot usages
+             */
+            initPcieSlotUsages() {
+                this.pcieSlotUsages = [];
+
+                const pcieSpeeds = [16, 8, 4];
+                const formFactors = [PCIE_FORM_FACTOR_FH, PCIE_FORM_FACTOR_LP];
+
+                for (const speed of pcieSpeeds) {
+                    for (const formFactor of formFactors) {
+                        const maxSlotsKey = `max_pcie_x${speed}_${formFactor.toLowerCase()}_slot`;
+                        const maxSlots = Alpine.store('BomStore').bom[maxSlotsKey] || 0;
+
+                        this.pcieSlotUsages.push({
+                            speed: speed,
+                            formFactor: formFactor,
+                            name: `${formFactor} x${speed} Slots`,
+                            max: maxSlots,
+                            used: 0,
+                            available: maxSlots,
+                            components: []
+                        });
+                    }
+                }
+
+                this.installSelectedPcieComponents();
+            },
+
+            /**
+             * Reset PCIe slot usages
+             */
+            resetPcieSlotUsages() {
+                for (const usage of this.pcieSlotUsages) {
+                    usage.used = 0;
+                    usage.available = usage.max;
+                    usage.components = [];
+                }
+            },
+
+            /**
+             * Core function to update component quantity
+             * @param {component, group, section}
+             * @param finalQuantity
+             * @throws Error
+             */
+            updateQuantity({component, group, section}, finalQuantity) {
+                console.groupCollapsed(`Update ${component.sku} [group: ${group.name}, section: ${section.name}] quantity to ${finalQuantity}`);
+
+                const componentMemoVersionToRestore = createComponentMemo(
+                    JSON.parse(JSON.stringify(Alpine.store('BomStore').bom))
+                );
+
+                const currentQuantity = component.quantity;
+                const quantityOffset = finalQuantity - currentQuantity;
+                const absQuantityOffset = Math.abs(finalQuantity - currentQuantity);
+
+                try {
+
+                    if (finalQuantity < 0) {
+                        throw new Error(QUANTITY_CANNOT_BE_LESS_THAN_ZERO);
+                    }
+
+                    let operation = null;
+                    if (finalQuantity > currentQuantity) {
+                        operation = QUANTITY_OPERATION_ADD;
+                    } else if (finalQuantity < currentQuantity) {
+                        operation = QUANTITY_OPERATION_SUB;
+                    } else {
+                        // Quantity not changed, go ahead. But nothing will change
+                    }
+                    console.log(`Operation: ${operation}`);
+
+                    console.groupCollapsed('Detail before');
+                    console.log(`Section Quantity Lower Limit : ${getSectionQuantityLowerLimit(section)}`);
+                    console.log(`Section Quantity Upper Limit : ${getSectionQuantityUpperLimit(section)}`);
+                    console.log(`Section Selected Quantity    : ${calculateSectionSelectedQuantity(section)}`);
+                    console.log(`Section Available Quantity   : ${calculateSectionAvailableQuantity(section)}`);
+                    console.log(`Component Current Quantity   : ${currentQuantity}`);
+                    console.log(`Component Final Quantity     : ${finalQuantity}`);
+                    console.log(`Operation Quantity Offset    : ${quantityOffset}`);
+                    console.log(`Operation Abs Quantity Offset: ${absQuantityOffset}`);
+                    console.groupEnd();
+
+                    this.runBeforeQuantityUpdateHooks({
+                        component: component,
+                        group: group,
+                        section: section,
+                        operation: operation,
+                        sectionLowerLimit: getSectionQuantityLowerLimit(section),
+                        sectionUpperLimit: getSectionQuantityUpperLimit(section),
+                        sectionSelectedQuantity: calculateSectionSelectedQuantity(section),
+                        sectionAvailableQuantity: calculateSectionAvailableQuantity(section),
+                        currentQuantity: currentQuantity,
+                        finalQuantity: finalQuantity,
+                        quantityOffset: quantityOffset,
+                        absQuantityOffset: absQuantityOffset,
+                    });
+
+                    console.log(`Update quantity to ${finalQuantity}`);
+                    component.quantity = finalQuantity;
+
+                    console.groupCollapsed('Detail after');
+                    console.log(`Section Quantity Lower Limit : ${getSectionQuantityLowerLimit(section)}`);
+                    console.log(`Section Quantity Upper Limit : ${getSectionQuantityUpperLimit(section)}`);
+                    console.log(`Section Selected Quantity    : ${calculateSectionSelectedQuantity(section)}`);
+                    console.log(`Section Available Quantity   : ${calculateSectionAvailableQuantity(section)}`);
+                    console.log(`Component Current Quantity   : ${currentQuantity}`);
+                    console.log(`Component Final Quantity     : ${finalQuantity}`);
+                    console.log(`Operation Quantity Offset    : ${quantityOffset}`);
+                    console.log(`Operation Abs Quantity Offset: ${absQuantityOffset}`);
+                    console.groupEnd();
+
+                    this.runAfterQuantityUpdateHooks({
+                        component: component,
+                        group: group,
+                        section: section,
+                        operation: operation,
+                        sectionLowerLimit: getSectionQuantityLowerLimit(section),
+                        sectionUpperLimit: getSectionQuantityUpperLimit(section),
+                        sectionSelectedQuantity: calculateSectionSelectedQuantity(section),
+                        sectionAvailableQuantity: calculateSectionAvailableQuantity(section),
+                        currentQuantity: currentQuantity,
+                        finalQuantity: finalQuantity,
+                        quantityOffset: quantityOffset,
+                        absQuantityOffset: absQuantityOffset,
+                    });
+
+                    consoleLogGreenText('Successfully update component quantity');
+
+                } catch (e) {
+                    consoleLogRedText(`Failed to update component quantity with error: ${e.message}`);
+
+                    consoleLogGreenText(`Don't worry. Components will be restored to memo version ${componentMemoVersionToRestore}`);
+
+                    this.restoreComponentsByVersion(componentMemoVersionToRestore);
+
+                    this.reinstallSelectedPcieComponents();
+
+                    throw e;
+                } finally {
+                    console.groupEnd();
+                }
+            },
+
+            /**
+             * Run before update quantity hooks
+             * @param payload
+             */
+            runBeforeQuantityUpdateHooks(payload) {
+                const hooks = [
+                    function ({component, section}) {
+                        if (section.is_radio) {
+                            console.log(`Force set quantity to 0 for other components in ${section.name} section`);
+                            const otherComponents = getOtherComponentsInSameSection(section, component);
+                            forceSetQuantityToZeroForComponents(otherComponents);
+                        }
+                    },
+                ];
+
+                try {
+                    console.groupCollapsed('Hooks before');
+
+                    for (const hook of hooks) {
+                        hook.call(this, payload);
+                    }
+                } catch (e) {
+                    consoleLogRedText(e.message);
+                    throw e;
+                } finally {
+                    console.groupEnd();
+                }
+            },
+
+            /**
+             * Run after update quantity hooks
+             * @param payload
+             */
+            runAfterQuantityUpdateHooks(payload) {
+                const hooks = [
+                    function ({section}) {
+                        if ([...this.aocSections, this.sasRaidCardSection, this.nvmeRaidCardSection].includes(section)) {
+                            console.log('Because affected component is AOC, so reinstall selected PCIe components');
+                            this.reinstallSelectedPcieComponents();
+                        }
+                    },
+                    function ({section}) {
+                        if (this.storageDriveSections.includes(section)) {
+                            console.log('Because affected component is storage drive, so update first SAS RAID card selected status');
+                            this.updateFirstSasRaidCardSelectedStatus();
+                        }
+                    },
+                    function ({component, group, section}) {
+                        console.log(`Validating rule: ${QUANTITY_CANNOT_BE_LESS_THAN_ZERO}`);
+                        if (component.quantity < 0) {
+                            throw new Error(QUANTITY_CANNOT_BE_LESS_THAN_ZERO);
+                        }
+                        consoleLogGreenText('Passed');
+                    },
+                    function ({component, group, section}) {
+                        console.log('Validating rule: Total selected quantity cannot be less than lower limit');
+                        const totalSelectedQuantity = calculateSectionSelectedQuantity(section);
+                        const lowerLimit = getSectionQuantityLowerLimit(section);
+                        if (totalSelectedQuantity < lowerLimit) {
+                            throw new Error(`Quantity cannot be less than ${lowerLimit}`);
+                        }
+                        consoleLogGreenText('Passed');
+                    },
+                    function ({component, group, section}) {
+                        console.log('Validating rule: Total selected quantity cannot be greater than upper limit');
+                        if (component.quantity > getSectionQuantityUpperLimit(section)) {
+                            throw new Error(`Quantity cannot be greater than ${getSectionQuantityUpperLimit(section)}`);
+                        }
+                        consoleLogGreenText('Passed');
+                    },
+                    function ({component, group, section}) {
+                        console.log('Validating rule: Total selected quantity cannot be greater than available quantity');
+                        const availableQuantity = calculateSectionAvailableQuantity(section);
+                        if (availableQuantity < 0) {
+                            throw new Error('Not enough available quantity');
+                        }
+                        consoleLogGreenText('Passed');
+                    },
+                    function ({component, group, section, quantityOffset}) {
+                        if (this.storageDriveSections.includes(section)) {
+                            console.log('Because affected component is storage drive, so validate total selected drives cannot be greater than max drive bays');
+                            if (this.usedDriveBays > this.maxDriveBays) {
+                                const messages = [];
+
+                                if (this.hddSection) {
+                                    const hddCount = calculateSectionSelectedQuantity(this.hddSection);
+                                    if (this.hddSection === section) {
+                                        messages.push(`HDDs: ${hddCount - quantityOffset}`);
+                                    } else {
+                                        messages.push(`HDDs: ${hddCount}`);
+                                    }
+                                }
+                                if (this.ssdSection) {
+                                    const ssdCount = calculateSectionSelectedQuantity(this.ssdSection);
+                                    if (this.ssdSection === section) {
+                                        messages.push(`SSDs: ${ssdCount - quantityOffset}`);
+                                    } else {
+                                        messages.push(`SSDs: ${ssdCount}`);
+                                    }
+                                }
+                                if (this.nvmeSection) {
+                                    const nvmeCount = calculateSectionSelectedQuantity(this.nvmeSection);
+                                    if (this.nvmeSection === section) {
+                                        messages.push(`NVMes: ${nvmeCount - quantityOffset}`);
+                                    } else {
+                                        messages.push(`NVMes: ${nvmeCount}`);
+                                    }
+                                }
+
+                                throw new Error(`Not enough available drive bays:\n ${messages.join(', ')}`);
+                            }
+                            consoleLogGreenText('Passed');
+                        }
+                    },
+                    function ({component, group, section}) {
+                        if (this.storageDriveSections.includes(section)) {
+                            console.log('Because affected component is storage drive, so validate total selected drives cannot be greater than available drive bays');
+                            const availableDriveBays = this.availableDriveBays;
+                            if (availableDriveBays < 0) {
+                                throw new Error('Not enough available drive bays');
+                            }
+                            consoleLogGreenText('Passed');
+                        }
+                    },
+                    function ({component, group, section}) {
+                        if (isChildSection(section)) {
+                            console.log('Because affected component in child section, so need make sure parent section has at least one component selected');
+                            const parentSection = findParentSection(section, this.parentSections);
+                            const parentSectionSelectedQuantity = calculateSectionSelectedQuantity(parentSection);
+
+                            if (parentSectionSelectedQuantity === 0) {
+                                throw new Error(`Please select at least one component in the ${parentSection.name} section above`);
+                            }
+
+                            consoleLogGreenText('Passed');
+                        }
+                    },
+                ];
+
+                try {
+                    console.groupCollapsed('Hooks after');
+
+                    for (const hook of hooks) {
+                        hook.call(this, payload);
+                    }
+                } catch (e) {
+                    consoleLogRedText(e.message);
+                    throw e;
+                } finally {
+                    console.groupEnd();
+                }
+            },
+
+            /**
+             * A wrapper function to update component quantity
+             * Prevent any error from breaking html
+             * @param {component, group, section}
+             * @param finalQuantity
+             */
+            tryUpdateQuantity({component, group, section}, finalQuantity) {
+                try {
+                    this.updateQuantity({component, group, section}, finalQuantity);
+                } catch (e) {
+                    //
+                }
+            },
+
+            /**
+             * Simulate a user clicking a button to change the component quantity
+             * Then catch any upcoming errors
+             * @param {component, group, section}
+             * @param finalQuantity
+             * @throws Error
+             */
+            simulateUpdateQuantity({component, group, section}, finalQuantity) {
+                try {
+                    console.groupCollapsed(`Simulating Update ${component.sku} [group: ${group.name}, section: ${section.name}] to quantity ${finalQuantity}`);
+
+                    const componentMemoVersionToRestore = createComponentMemo(
+                        JSON.parse(JSON.stringify(Alpine.store('BomStore').bom))
+                    );
+
+                    this.updateQuantity({component, group, section}, finalQuantity);
+
+                    // If no error is thrown, it means quantity update is successful. So need to restore
+                    this.restoreComponentsByVersion(componentMemoVersionToRestore);
+                } catch (e) {
+                    throw e;
+                } finally {
+                    this.reinstallSelectedPcieComponents();
+                    console.groupEnd();
+                }
+            },
+
+            /**
+             * Determine if the quantity option is invalid
+             * @param {component, group, section}
+             * @param finalQuantity
+             * @returns {boolean}
+             */
+            isQuantityOptionValueValid({component, group, section}, finalQuantity) {
+                try {
+                    this.simulateUpdateQuantity({component, group, section}, finalQuantity);
+                } catch (e) {
+                    return false;
+                }
+
+                return true;
+            },
+
+            /**
+             * Generate valid quantity option values
+             * @param {component, group, section}
+             * @returns {Promise<[]>}
+             */
+            generateValidQuantityOptionValues({component, group, section}) {
+                return new Promise((resolve) => {
+                    const optionValues = generateQuantityOptionValues(0, section.step, getSectionQuantityUpperLimit(section));
+
+                    const validValues = optionValues.filter(value => {
+                        return this.isQuantityOptionValueValid({component, group, section}, value);
+                    });
+
+                    if (validValues.length === 0) {
+                        validValues.push(0);
+                    }
+
+                    resolve(validValues);
+                });
+            },
+
+            /**
+             * Determine if the quantity operation button is exception
+             * @param {component, group, section}
+             * @param finalQuantity
+             * @returns {object}
+             */
+            isQuantityOperationButtonException({component, group, section}, finalQuantity) {
+                const result = {
+                    is_exception: false,
+                    message: null,
+                    sku: component.sku,
+                    description: component.description
+                };
+
+                try {
+                    this.simulateUpdateQuantity({component, group, section}, finalQuantity);
+                } catch (e) {
+                    result.is_exception = true;
+                    const message = e.message;
+
+                    // No need to show message for quantity cannot be less than 0
+                    if (message === QUANTITY_CANNOT_BE_LESS_THAN_ZERO) {
+                        result.message = null;
+                    } else {
+                        result.message = e.message;
+                    }
+                }
+
+                return result;
+            },
+
+            /**
+             * Restore components to a specific version
+             * @param versionToRestore
+             */
+            restoreComponentsByVersion(versionToRestore) {
+                const memo = COMPONENT_MEMOS.find(memo => memo.version === versionToRestore);
+
+                if (memo === undefined) {
+                    consoleLogRedText(`Logic error: Component memo version ${versionToRestore} not found`);
+                    return;
+                }
+
+                console.log(`Component memo version ${versionToRestore} to restore:`, memo);
+
+                for (const section of Alpine.store('BomStore').bom.sections) {
+                    for (const group of section.groups) {
+                        for (const component of group.components) {
+                            const componentInMemo = memo.components.find(c => c.identifier === component.identifier);
+
+                            if (!componentInMemo) {
+                                throw new Error(`Component ${component.sku} not found in current BOM`);
+                            }
+
+                            if (component.quantity !== componentInMemo.quantity) {
+                                component.quantity = componentInMemo.quantity;
+                            }
+                        }
+                    }
+                }
+            },
+
+            /**
+             * Re-install all selected PCIE components
+             */
+            reinstallSelectedPcieComponents() {
+                console.log('Reset PCIE slot usages');
+                this.resetPcieSlotUsages();
+                console.log('Install selected PCIE components');
+                this.installSelectedPcieComponents();
+            },
+
+            installSelectedPcieComponents() {
+                for (const component of this.selectedPcieComponents) {
+                    this.installPcieComponent(component);
+                }
+            },
+
+            /**
+             * Install a PCIE component
+             * @param component
+             */
+            installPcieComponent(component) {
+                const installer = this.getPcieComponentInstaller(component);
+
+                if (!installer(component)) {
+                    const componentSpeed = parsePcieSpeed(getComponentAttribute(component, 'pcie_speed'));
+                    const componentFormFactor = getComponentAttribute(component, 'form_factor');
+                    throw new Error(`No available ${componentFormFactor} x${componentSpeed} PCIE slot and no compatible slot with higher speed either. Please hover over the PCIE slot usage indicator to view details`);
+                }
+            },
+
+            /**
+             * Get PCIE component installer
+             * @param component
+             * @returns {function}
+             */
+            getPcieComponentInstaller(component) {
+                const componentSpeed = parsePcieSpeed(getComponentAttribute(component, 'pcie_speed'));
+                const componentFormFactor = getComponentAttribute(component, 'form_factor');
+
+                if (componentFormFactor !== PCIE_FORM_FACTOR_FH && componentFormFactor !== PCIE_FORM_FACTOR_LP) {
+                    throw new Error(`Can not install component ${component.sku} with invalid form factor ${componentFormFactor}`);
+                }
+
+                const chainInstaller = (chain) => {
+                    return (component) => {
+                        let remainingQuantity = component.quantity;
+
+                        for (let handler of chain) {
+                            if (remainingQuantity > 0) {
+                                remainingQuantity = handler(component, remainingQuantity);
+                            }
+                            if (remainingQuantity === 0) {
+                                return true;
+                            }
+                        }
+                        return remainingQuantity === 0;
+                    };
+                };
+
+                const createInstaller = (component, speed, formFactor, remainingQuantity) => {
+                    const slot = this.pcieSlotUsages.find(
+                        s => s.speed === speed && s.formFactor === formFactor && s.available > 0
+                    );
+
+                    const componentPcieSlotWidth = getComponentAttribute(component, 'pcie_slot_width');
+                    const componentPcieSpeed = parsePcieSpeed(getComponentAttribute(component, 'pcie_speed'));
+                    const componentPcieFormFactor = getComponentAttribute(component, 'form_factor');
+
+                    if (slot) {
+                        let installableQuantity = Math.min(
+                            Math.floor(slot.available / componentPcieSlotWidth),
+                            remainingQuantity
+                        );
+
+                        if (installableQuantity > 0) {
+                            const existingComponent = slot.components.find(c => c.sku === component.sku);
+
+                            if (existingComponent) {
+                                existingComponent.quantity += installableQuantity;
+                            } else {
+                                slot.components.push({
+                                    sku: component.sku,
+                                    identifier: component.identifier,
+                                    description: component.description,
+                                    quantity: installableQuantity,
+                                    pcieFormFactor: componentPcieFormFactor,
+                                    pcieSpeed: componentPcieSpeed,
+                                    pcieSlotWidth: componentPcieSlotWidth
+                                });
+                            }
+
+                            slot.used += installableQuantity * componentPcieSlotWidth;
+                            slot.available = slot.max - slot.used;
+
+                            remainingQuantity -= installableQuantity;
+                        }
+                    }
+
+                    return remainingQuantity;
+                };
+
+                const strategy = {
+                    [PCIE_FORM_FACTOR_FH]: {
+                        4: chainInstaller([
+                            (component, remainingQuantity) => createInstaller(component, 4, PCIE_FORM_FACTOR_FH, remainingQuantity),
+                            (component, remainingQuantity) => createInstaller(component, 8, PCIE_FORM_FACTOR_FH, remainingQuantity),
+                            (component, remainingQuantity) => createInstaller(component, 16, PCIE_FORM_FACTOR_FH, remainingQuantity)
+                        ]),
+                        8: chainInstaller([
+                            (component, remainingQuantity) => createInstaller(component, 8, PCIE_FORM_FACTOR_FH, remainingQuantity),
+                            (component, remainingQuantity) => createInstaller(component, 16, PCIE_FORM_FACTOR_FH, remainingQuantity)
+                        ]),
+                        16: chainInstaller([
+                            (component, remainingQuantity) => createInstaller(component, 16, PCIE_FORM_FACTOR_FH, remainingQuantity)
+                        ])
+                    },
+                    [PCIE_FORM_FACTOR_LP]: {
+                        4: chainInstaller([
+                            (component, remainingQuantity) => createInstaller(component, 4, PCIE_FORM_FACTOR_LP, remainingQuantity),
+                            (component, remainingQuantity) => createInstaller(component, 4, PCIE_FORM_FACTOR_FH, remainingQuantity),
+                            (component, remainingQuantity) => createInstaller(component, 8, PCIE_FORM_FACTOR_LP, remainingQuantity),
+                            (component, remainingQuantity) => createInstaller(component, 8, PCIE_FORM_FACTOR_FH, remainingQuantity),
+                            (component, remainingQuantity) => createInstaller(component, 16, PCIE_FORM_FACTOR_LP, remainingQuantity),
+                            (component, remainingQuantity) => createInstaller(component, 16, PCIE_FORM_FACTOR_FH, remainingQuantity)
+                        ]),
+                        8: chainInstaller([
+                            (component, remainingQuantity) => createInstaller(component, 8, PCIE_FORM_FACTOR_LP, remainingQuantity),
+                            (component, remainingQuantity) => createInstaller(component, 8, PCIE_FORM_FACTOR_FH, remainingQuantity),
+                            (component, remainingQuantity) => createInstaller(component, 16, PCIE_FORM_FACTOR_LP, remainingQuantity),
+                            (component, remainingQuantity) => createInstaller(component, 16, PCIE_FORM_FACTOR_FH, remainingQuantity)
+                        ]),
+                        16: chainInstaller([
+                            (component, remainingQuantity) => createInstaller(component, 16, PCIE_FORM_FACTOR_LP, remainingQuantity),
+                            (component, remainingQuantity) => createInstaller(component, 16, PCIE_FORM_FACTOR_FH, remainingQuantity)
+                        ])
+                    }
+                };
+
+                return strategy[componentFormFactor][componentSpeed];
+            },
+
+            /**
+             * Determine if a block is expanded
+             * @param identifier
+             */
+            isBlockExpanded(identifier) {
+                if (this.blockExpandedStatus[identifier] === undefined) {
+                    return true;
+                }
+
+                return this.blockExpandedStatus[identifier];
+            },
+
+            /**
+             * Toggle block expanded status
+             * @param identifier
+             */
+            toggleBlockExpandedStatus(identifier) {
+                if (this.blockExpandedStatus[identifier] === undefined) {
+                    consoleLogRedText(`Block ${identifier} not found in blockExpandedStatus`);
+                } else {
+                    this.blockExpandedStatus[identifier] = !this.blockExpandedStatus[identifier];
+                }
+            },
+
+            /**
+             * Toggle all blocks expanded status
+             */
+            toggleAllBlocksExpandedStatus() {
+                this.allBlocksExpandedStatus = !this.allBlocksExpandedStatus;
+                for (const identifier in this.blockExpandedStatus) {
+                    this.blockExpandedStatus[identifier] = this.allBlocksExpandedStatus;
+                }
+            },
+
+            get maxDriveBays() {
+                return Alpine.store('BomStore').bom.front_max_drives || 0;
+            },
+
+            get onboardRaidCard() {
+                return Alpine.store('BomStore').bom.onboard_raid_card;
+            },
+
+            get parentSections() {
+                return Alpine.store('BomStore').parentSections;
+            },
+            get childSections() {
+                return Alpine.store('BomStore').childSections;
+            },
+            get bareboneSection() {
+                return Alpine.store('BomStore').bareboneSection;
+            },
+            get chassisSection() {
+                return Alpine.store('BomStore').chassisSection;
+            },
+            get motherboardSection() {
+                return Alpine.store('BomStore').motherboardSection;
+            },
+            get readOnlySections() {
+                return Alpine.store('BomStore').readOnlySections;
+            },
+            get rearBootDriveSection() {
+                return Alpine.store('BomStore').rearBootDriveSection;
+            },
+            get m2BootDriveSection() {
+                return Alpine.store('BomStore').m2BootDriveSection;
+            },
+            get bootDriveSections() {
+                return Alpine.store('BomStore').bootDriveSections;
+            },
+            get cpuSections() {
+                return Alpine.store('BomStore').cpuSections;
+            },
+            get ramSections() {
+                return Alpine.store('BomStore').ramSections;
+            },
+            get hddSection() {
+                return Alpine.store('BomStore').hddSection;
+            },
+            get ssdSection() {
+                return Alpine.store('BomStore').ssdSection;
+            },
+            get nvmeSection() {
+                return Alpine.store('BomStore').nvmeSection;
+            },
+            get storageDriveSections() {
+                return Alpine.store('BomStore').storageDriveSections;
+            },
+            get sasRaidCardSection() {
+                return Alpine.store('BomStore').sasRaidCardSection;
+            },
+            get nvmeRaidCardSection() {
+                return Alpine.store('BomStore').nvmeRaidCardSection;
+            },
+            get cacheVaultSection() {
+                return Alpine.store('BomStore').cacheVaultSection;
+            },
+            get gpuSection() {
+                return Alpine.store('BomStore').gpuSection;
+            },
+            get nicSection() {
+                return Alpine.store('BomStore').nicSection;
+            },
+            get aocSections() {
+                return Alpine.store('BomStore').aocSections;
+            },
+            get normalParentSections() {
+                return Alpine.store('BomStore').normalParentSections;
+            },
+
+            get normalSectionCollections() {
+                const collections = this.normalParentSections.reduce((carry, section) => {
+                    const collectionName = section.collection_name || null;
+
+                    if (!collectionName) {
+                        return carry;
+                    }
+
+                    if (!carry[collectionName]) {
+                        carry[collectionName] = [];
+                    }
+
+                    carry[collectionName].push(section);
+
+                    return carry;
+                }, {});
+
+                return Object.keys(collections).map(collectionName => ({
+                    name: collectionName,
+                    sections: collections[collectionName]
+                }));
+            },
+
+            get aocSectionCollections() {
+                if (this.aocSections.length === 0) {
+                    return [];
+                }
+
+                return [
+                    {
+                        name: "AOC",
+                        sections: this.aocSections
+                    }
+                ];
+            },
+
+            get notCollectedNormalParentSections() {
+                return this.normalParentSections.filter(section => !section.collection_name);
+            },
+
+            get usedDriveBays() {
+                return this.storageDriveSections.reduce((carry, section) => {
+                    return carry + calculateSectionSelectedQuantity(section);
+                }, 0);
+            },
+
+            get availableDriveBays() {
+                return this.maxDriveBays - this.usedDriveBays;
+            },
+
+            get selectedSataStorageDriveCount() {
+                let count = 0;
+
+                for (const section of this.storageDriveSections) {
+                    for (const group of section.groups) {
+                        for (const component of group.components) {
+                            const driveInterface = getComponentAttribute(component, 'platform_type');
+
+                            if (driveInterface === DRIVE_INTERFACE_SATA) {
+                                if (component.quantity > 0) {
+                                    count += component.quantity;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                return count;
+            },
+
+            get selectedSasStorageDriveCount() {
+                let count = 0;
+
+                for (const section of this.storageDriveSections) {
+                    for (const group of section.groups) {
+                        for (const component of group.components) {
+                            const driveInterface = getComponentAttribute(component, 'platform_type');
+
+                            if (driveInterface === DRIVE_INTERFACE_SAS) {
+                                if (component.quantity > 0) {
+                                    count += component.quantity;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                return count;
+            },
+
+            get selectedNvmeStorageDriveCount() {
+                let count = 0;
+
+                for (const section of this.storageDriveSections) {
+                    for (const group of section.groups) {
+                        for (const component of group.components) {
+                            const driveInterface = getComponentAttribute(component, 'platform_type');
+
+                            if (driveInterface === DRIVE_INTERFACE_NVME) {
+                                if (component.quantity > 0) {
+                                    count += component.quantity;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                return count;
+            },
+
+            get selectedPcieComponents() {
+                const fhComponents = [];
+                const lpComponents = [];
+
+                const sections = [
+                    ...this.aocSections,
+                    this.sasRaidCardSection,
+                    this.nvmeRaidCardSection
+                ].filter(section => section !== undefined && section !== null);
+
+                for (const section of sections) {
+                    for (const group of section.groups) {
+                        for (const component of group.components) {
+                            if (component.quantity > 0) {
+                                const formFactor = getComponentAttribute(component, 'form_factor');
+                                if (formFactor === PCIE_FORM_FACTOR_FH) {
+                                    fhComponents.push(component);
+                                } else if (formFactor === PCIE_FORM_FACTOR_LP) {
+                                    lpComponents.push(component);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                fhComponents.sort((a, b) => parsePcieSpeed(getComponentAttribute(a, 'pcie_speed')) - parsePcieSpeed(getComponentAttribute(b, 'pcie_speed')));
+                lpComponents.sort((a, b) => parsePcieSpeed(getComponentAttribute(a, 'pcie_speed')) - parsePcieSpeed(getComponentAttribute(b, 'pcie_speed')));
+
+                return [
+                    ...fhComponents,
+                    ...lpComponents
+                ];
+            },
+        }
+    }
+</script>
+
+<div x-data="setupBom()" class="w-full min-h-[700px]">
+    <template x-if="$store.BomStore.loading">
+        <div class="w-full">
+            <div class="bg-white p-4 mb-2 rounded-lg animate-pulse">
+                <div class="h-8 w-32 bg-gray-300 rounded mb-4"></div>
+                <div class="h-20 bg-gray-300 rounded"></div>
+            </div>
+            <div class="bg-white p-4 mb-2 rounded-lg animate-pulse">
+                <div class="h-8 w-12 bg-gray-300 rounded mb-4"></div>
+                <div class="h-6 bg-gray-300 rounded mb-2"></div>
+                <div class="h-6 bg-gray-300 rounded mb-2"></div>
+                <div class="h-6 bg-gray-300 rounded mb-2"></div>
+                <div class="h-6 bg-gray-300 rounded"></div>
+            </div>
+            <div class="bg-white p-4 mb-2 rounded-lg animate-pulse">
+                <div class="h-8 w-12 bg-gray-300 rounded mb-4"></div>
+                <div class="h-6 bg-gray-300 rounded mb-2"></div>
+                <div class="h-6 bg-gray-300 rounded mb-2"></div>
+                <div class="h-6 bg-gray-300 rounded mb-2"></div>
+                <div class="h-6 bg-gray-300 rounded"></div>
+            </div>
+            <div class="bg-white p-4 mb-2 rounded-lg animate-pulse">
+                <div class="h-8 w-20 bg-gray-300 rounded mb-4"></div>
+                <div class="h-6 bg-gray-300 rounded mb-2"></div>
+                <div class="h-6 bg-gray-300 rounded mb-2"></div>
+                <div class="h-6 bg-gray-300 rounded mb-2"></div>
+                <div class="h-6 bg-gray-300 rounded"></div>
+            </div>
+        </div>
+    </template>
+
+    <template x-if="!$store.BomStore.loading">
+        <div class="w-full">
+
+            <div x-html="document.getElementById('expandAllBlocksTemplate').innerHTML"></div>
+
+            <template x-if="readOnlySections.length">
+                <div x-html="document.getElementById('readOnlyBlockTemplate').innerHTML"></div>
+            </template>
+
+            <template x-if="cpuSections.length || ramSections.length">
+                <div x-data="{ sections: [...cpuSections, ...ramSections] }"
+                     x-html="document.getElementById('sectionsTemplate').innerHTML"></div>
+            </template>
+
+            <template x-if="bootDriveSections.length || storageDriveSections.length">
+                <div x-html="document.getElementById('driveBlockTemplate').innerHTML"></div>
+            </template>
+
+            <template x-if="aocSections.length">
+                <div x-html="document.getElementById('aocBlockTemplate').innerHTML"></div>
+            </template>
+
+            <template x-if="normalParentSections.length">
+                <div x-data="{ collections: normalSectionCollections }"
+                     x-html="document.getElementById('tabSectionCollectionsTemplate').innerHTML"></div>
+            </template>
+
+            <template x-if="notCollectedNormalParentSections.length">
+                <div x-data="{ sections: notCollectedNormalParentSections }"
+                     x-html="document.getElementById('sectionsTemplate').innerHTML"></div>
+            </template>
+
+            <div x-html="document.getElementById('warrantyTemplate').innerHTML"></div>
+        </div>
+    </template>
+
+    <?php if (!$isProduction || $isInAdmin): ?>
+        <template x-teleport="body">
+            <button class="bomDebugButton"
+                    @click="document.documentElement.style.setProperty('--bomDebug-display', getComputedStyle(document.documentElement).getPropertyValue('--bomDebug-display').trim() === 'block' ? 'none' : 'block');">
+                Toggle Debug
+            </button>
+        </template>
+    <?php endif; ?>
+
+    <div class="bomDebug rounded-xl p-4 mt-2">
+        <div class="flex flex-col gap-3">
+            <div class="flex gap-4">
+                <span x-text="`AssemblyRate: ${$store.BomStore.bom.assembly_rate}`"></span>
+                <span x-text="`MinAssemblyCost: ${$store.BomStore.bom.min_assembly_cost}`"></span>
+                <span x-text="`GP: ${$store.BomStore.bom.gp}`"></span>
+            </div>
+            <pre class="whitespace-pre-wrap break-words" x-text="$store.BomStore.hardwarePriceFormula"></pre>
+            <pre class="whitespace-pre-wrap break-words" x-text="$store.BomStore.softwarePriceFormula"></pre>
+            <pre class="whitespace-pre-wrap break-words" x-text="$store.BomStore.componentPriceFormula"></pre>
+            <pre class="whitespace-pre-wrap break-words" x-text="$store.BomStore.assemblyPriceFormula"></pre>
+            <pre class="whitespace-pre-wrap break-words" x-text="$store.BomStore.warrantyPriceFormula"></pre>
+            <pre class="whitespace-pre-wrap break-words" x-text="$store.BomStore.unitPriceFormula"></pre>
+        </div>
+    </div>
+
+    <div class="bomDebug rounded-xl p-4 mt-2 text-lg">
+        <div>All Section Names:</div>
+        <template x-for="section in $store.BomStore.bom.sections">
+            <div x-text="section.name"></div>
+        </template>
+    </div>
+</div>
+
+<template id="aocBlockTemplate">
+    <div class="relative">
+        
+
+        <div  class="pt-0  lg:pt-0 bg-white rounded-xl" x-data="{ collections: aocSectionCollections }"
+             x-html="document.getElementById('tabSectionCollectionsTemplate').innerHTML"></div>
+    </div>
+</template>
+
+<template id="driveBlockTemplate">
+    <div class="bg-white rounded-xl p-4 mb-2">
+        <div @click="toggleBlockExpandedStatus('Storage')" class="flex items-center justify-between cursor-pointer">
+            <div class="font-semibold text-base lg:text-lg">Storage</div>
+            <div class="flex items-center justify-between gap-2">
+                <div x-data="{ identifier: 'Storage' }"
+                     x-html="document.getElementById('blockExpandedStatusToggleTemplate').innerHTML"></div>
+            </div>
+        </div>
+
+        <div x-show="isBlockExpanded('Storage')">
+            <div x-data="{ sections: bootDriveSections }"
+                 x-html="document.getElementById('tabSectionsTemplate').innerHTML"></div>
+
+            <div class="flex flex-col bg-white mt-2 rounded-xl"
+                 x-data="{ activeTabName: storageDriveSections.length ? 'Main Storage' : 'SAS RAID Card' }">
+                <div class="flex items-center bg-white mb-[-16px]">
+                    <div class="flex-1 item-center">
+                        <template x-if="storageDriveSections.length">
+                            <div class="inline-block cursor-pointer pb-2 my-4 mr-4 font-medium"
+                                 :class="activeTabName === 'Main Storage' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-800'"
+                                 @click="activeTabName = 'Main Storage'">
+                                Main Storage
+                            </div>
+                        </template>
+
+                        <template x-if="sasRaidCardSection">
+                            <div class="inline-block cursor-pointer pb-2 my-4 mr-4 font-medium"
+                                 :class="activeTabName === 'SAS RAID Card' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-800'"
+                                 @click="activeTabName = 'SAS RAID Card'">
+                                SAS RAID Card
+                            </div>
+                        </template>
+                    </div>
+                </div>
+
+                <div class="-mb-2">
+                    <template x-if="storageDriveSections.length">
+                        <div x-show="activeTabName === 'Main Storage'">
+                            <div class="relative">
+                                    <div class="absolute z-[1]  right-[150px] lg:right-[168px] top-[50px]  lg:top-[45px] rounded">
+                                        <div
+                                            x-text="`${usedDriveBays} / ${maxDriveBays} Total Drive Bays`"
+                                            @click="event.stopPropagation()"
+                                            class="sectionProgressBar"
+                                            :style="`--ratio: ${usedDriveBays / maxDriveBays}`"></div>
+                                    </div>
+                                </div>
+
+
+                            <div x-data="{ sections: storageDriveSections }"
+                                 x-html="document.getElementById('tabSectionsTemplate').innerHTML"></div>
+                        </div>
+                    </template>
+
+                    <template x-if="sasRaidCardSection">
+                        <div x-show="activeTabName === 'SAS RAID Card'">
+                            <div class="-mx-4 -mb-4" x-data="{ section: sasRaidCardSection }"
+                                 x-html="document.getElementById('sectionTemplate').innerHTML"></div>
+                        </div>
+                    </template>
+                </div>
+            </div>
+        </div>
+    </div>
+</template>
+
+<template id="sectionsTemplate">
+    <template x-for="section in sections" :key="section.section_id">
+        <div x-data="{ section: section }"
+             x-html="document.getElementById('sectionTemplate').innerHTML"
+             :data-cy="section.identifier"></div>
+    </template>
+</template>
+
+<template id="sectionTemplate">
+    <div class="bg-white rounded-xl p-4 mb-2"
+         x-data="{ section: section }">
+        <div @click="toggleBlockExpandedStatus(section.name)"
+             class="flex items-center justify-between cursor-pointer">
+            <div x-text="section.name" class="font-semibold text-base lg:text-lg flex-grow break-all"></div>
+            <div class="flex items-center justify-between flex-none gap-2">
+                <div
+                    x-text="`${calculateSectionSelectedQuantity(section)} / ${getSectionQuantityUpperLimit(section)}${getSectionProgressBarSuffix(section) ? ` ${getSectionProgressBarSuffix(section)}` : ''}`"
+                    @click="event.stopPropagation()"
+                    class="sectionProgressBar"
+                    :style="`--ratio: ${calculateSectionSelectedQuantity(section) / getSectionQuantityUpperLimit(section)}`"></div>
+
+                <div x-data="{ identifier: section.name }"
+                     x-html="document.getElementById('blockExpandedStatusToggleTemplate').innerHTML"></div>
+            </div>
+        </div>
+
+        <div x-show="isBlockExpanded(section.name)" class="mt-5 text-sm">
+            <div x-data="{ groups: section.groups }"
+                 x-html="document.getElementById('groupsTemplate').innerHTML"></div>
+
+            <template x-for="childSection in findChildSections(section, childSections)"
+                      :key="childSection.section_id">
+                <div class="-mr-4 -mb-4" x-data="{ section: childSection }"
+                     x-html="document.getElementById('sectionTemplate').innerHTML"></div>
+            </template>
+        </div>
+    </div>
+</template>
+
+<template id="groupsTemplate">
+    <div class="border rounded px-4 pb-2 flex flex-col"
+         :class="calculateSectionComponentCount(section) > 6 ? 'max-h-[300px] overflow-y-scroll ' : ''"
+         :id="generateScrollableGroupsContainerId(section)"
+         x-data="{ groups: groups }">
+        <template x-for="group in groups" :key="group.group_id">
+            <div :data-cy="group.identifier">
+                <div x-text="group.name" class="font-bold text-xs mt-5 mb-1"></div>
+                <div class="flex flex-col gap-1">
+                    <template x-for="component in group.components" :key="component.component_id">
+                        <div x-data="{ component: component, group: group, section: section }"
+                             x-html="document.getElementById('componentTemplate').innerHTML"></div>
+                    </template>
+                </div>
+            </div>
+        </template>
+    </div>
+</template>
+
+<template id="componentTemplate">
+    <div
+        class="flex items-center justify-between bg-white lg:hover:bg-gray-200 gap-2 min-h-8 px-[6px] mx-[-4px] rounded"
+        :class="component.quantity > 0 ? 'bg-gray-100' : 'bg-white'"
+        x-data="{ component: component, group: group, section: section }"
+        :data-cy="component.identifier">
+        <div x-data="{extraInfos: getComponentExtraInInfos(component)}">
+
+            <div>
+                <div class="text-sm" x-text="component.description"></div>
+                <div class="bomDebug" x-text="`SKU: ${component.sku}`"></div>
+                <div class="bomDebug" x-text="`UnitPrice: ${component.price}`"></div>
+                <div class="bomDebug" x-text="`IsHardware: ${component.is_hardware}`"></div>
+                <div class="bomDebug" x-text="`Sequence: ${component.order}`"></div>
+
+                <div class="bomDebug" x-text="`TirePriceCode: ${component.tire_price_code}`"></div>
+                <div class="bomDebug" x-text="`QuantityToBuy: ${component.quantity * $store.BomStore.quantity} (${component.quantity}*${$store.BomStore.quantity})`"></div>
+                <div class="bomDebug" x-text="`StockStatus: ${component.is_in_stock}`"></div>
+                <div class="bomDebug" x-text="`StockQuantity: ${component.stock_quantity}`"></div>
+                <div class="bomDebug" x-text="`Backorder: ${component.is_backorder}`"></div>
+                <div class="bomDebug" x-text="`ItemRemark: ${component.component_type}`"></div>
+                <div class="bomDebug"
+                    x-text="`Salable: ${$store.BomStore.determineIsSalable(component.is_in_stock, component.is_backorder, component.stock_quantity, component.quantity * $store.BomStore.quantity)}`"
+                    :class="$store.BomStore.determineIsSalable(component.is_in_stock, component.is_backorder, component.stock_quantity, component.quantity * $store.BomStore.quantity) ? 'text-green-500' : 'text-red-500'"></div>
+                <template x-if="extraInfos.length > 0">
+                    <template x-for="(info, index) in extraInfos" :key="info.attribute_code">
+                        <div class="bomDebug" x-text="`${info.attribute_code.replace(/(^|_)([a-z])/g, (match, underscore, letter) => letter.toUpperCase())}: ${info.value}`"></div>
+                    </template>
+                </template>
+            </div>
+        </div>
+
+        <div class="flex items-center space-x-2">
+
+            <!-- Subtract Quantity Button -->
+            <button @click="const buttonRectBottom = $el.getBoundingClientRect().bottom;
+                        const scrollableRectBottom = document.getElementById(generateScrollableGroupsContainerId(section)).getBoundingClientRect().bottom;
+                        const result = isQuantityOperationButtonException({component, group, section}, component.quantity - section.step);
+                        if (result.is_exception && result.message) {
+                            $nextTick(() => {
+                                showQuantityOperationTooltip(
+                                    component.identifier,
+                                    result,
+                                    buttonRectBottom,
+                                    scrollableRectBottom,
+                                    QUANTITY_OPERATION_SUB
+                                );
+                            });
+                        }
+                        if (!result.is_exception) {
+                            tryUpdateQuantity({component, group, section}, component.quantity - section.step)
+                        }
+                    "
+                    @mouseleave="hideQuantityOperationTooltip(component.identifier, QUANTITY_OPERATION_SUB)"
+                    :data-cy="generateQuantityButtonId(component.identifier, QUANTITY_OPERATION_SUB)"
+                    class="relative h-[24px] w-[24px] flex items-center justify-center rounded-full border border-gray-200 bg-white text-black text-[24px] font-light hover:bg-white focus:bg-white">
+                -
+                <div :id="generateQuantityButtonTooltipId(component.identifier, QUANTITY_OPERATION_SUB)"
+                     style="display: none;"
+                     @click.outside="$el.setAttribute('style', 'display: none;');"
+                     class="absolute right-[30px] z-[5] w-40 lg:w-52 min-h-[32px] p-2 text-xs text-white bg-sky-950 rounded shadow-lg">
+                <span :id="generateQuantityButtonTooltipArrowId(component.identifier, QUANTITY_OPERATION_SUB)"
+                      class="absolute right-[-6px] border-solid border-[6px] border-r-0 border-transparent border-l-sky-950"></span>
+                    <span
+                        :id="generateQuantityButtonTooltipMessageId(component.identifier, QUANTITY_OPERATION_SUB)"></span>
+                </div>
+            </button>
+
+            <select x-data="{ optionValues: [] }"
+                    @mouseenter="async () => optionValues = await generateValidQuantityOptionValues({component, group, section});"
+                    @change="tryUpdateQuantity({component, group, section}, parseInt($event.target.value))"
+                    :data-cy="generateQuantitySelectId(component.identifier)"
+                    class="w-[60px] px-3 border border-gray-300 bg-white rounded text-sm text-gray-700 focus:outline-none focus:ring-0 focus:border-gray-300 hover:bg-white">
+                <template
+                    x-for="value in Array.from(new Set([...optionValues, component.quantity])).sort((a, b) => a - b)"
+                    :key="value">
+                    <option :value="value" x-text="value" :selected="component.quantity === value"></option>
+                </template>
+            </select>
+
+            <!-- Add Quantity Button -->
+            <button @click="const buttonRectBottom = $el.getBoundingClientRect().bottom;
+                        const scrollableRectBottom = document.getElementById(generateScrollableGroupsContainerId(section)).getBoundingClientRect().bottom;
+                        const result = isQuantityOperationButtonException({component, group, section}, component.quantity + section.step);
+                        if (result.is_exception && result.message) {
+                            $nextTick(() => {
+                                showQuantityOperationTooltip(
+                                    component.identifier,
+                                    result,
+                                    buttonRectBottom,
+                                    scrollableRectBottom,
+                                    QUANTITY_OPERATION_ADD
+                                );
+                            });
+                        }
+                        if (!result.is_exception) {
+                            tryUpdateQuantity({component, group, section}, component.quantity + section.step)
+                        }
+                    "
+                    @mouseleave="hideQuantityOperationTooltip(component.identifier, QUANTITY_OPERATION_ADD)"
+                    :data-cy="generateQuantityButtonId(component.identifier, QUANTITY_OPERATION_ADD)"
+                    class="relative h-[24px] w-[24px] flex items-center justify-center rounded-full border border-gray-200 bg-white text-black text-[24px] font-light hover:bg-white focus:bg-white">
+                +
+                <div :id="generateQuantityButtonTooltipId(component.identifier, QUANTITY_OPERATION_ADD)"
+                     style="display: none;"
+                     @click.outside="$el.setAttribute('style', 'display: none;');"
+                     class="absolute right-[30px] z-[5] w-40 lg:w-52 min-h-[32px] p-2 text-xs text-white bg-sky-950 rounded shadow-lg">
+                <span :id="generateQuantityButtonTooltipArrowId(component.identifier, QUANTITY_OPERATION_ADD)"
+                      class="absolute right-[-6px] border-solid border-[6px] border-r-0 border-transparent border-l-sky-950"></span>
+                    <span
+                        :id="generateQuantityButtonTooltipMessageId(component.identifier, QUANTITY_OPERATION_ADD)"></span>
+                </div>
+            </button>
+        </div>
+    </div>
+</template>
+
+<template id="tabSectionCollectionsTemplate">
+    <template x-for="collection in collections" :key="collection.name">
+        <div class="bg-white rounded-xl p-4 mb-2">
+            
+            <div @click="toggleBlockExpandedStatus(collection.name)"
+                 class="flex items-center justify-between cursor-pointer">
+                <div x-text="collection.name" class="font-semibold text-base lg:text-lg"></div>
+                <div class="flex items-center justify-between gap-2">
+                    <div x-data="{ identifier: collection.name }"
+                         x-html="document.getElementById('blockExpandedStatusToggleTemplate').innerHTML"></div>
+                </div>
+            </div>
+            <div x-show="isBlockExpanded('AOC')">
+                <div x-html="document.getElementById('pcieSlotsUsages').innerHTML"></div>
+            </div>
+
+            <div x-show="isBlockExpanded(collection.name)">
+                <div x-data="{ sections: collection.sections }"
+                     x-html="document.getElementById('tabSectionsTemplate').innerHTML"></div>
+            </div>
+        </div>
+    </template>
+</template>
+
+<template id="tabSectionsTemplate">
+    <div class="bg-white rounded-xl"
+         x-data="{ activeTab: 0, sections: sections }">
+        <div class="flex items-center bg-white mb-2">
+            <div class="flex-1">
+                <template x-for="(section, index) in sections" :key="index">
+                    <div class="inline-block cursor-pointer pb-1 my-4 mr-4 font-medium"
+                         :class="activeTab === index ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-800'"
+                         @click="activeTab = index;">
+                        <span x-text="section.name" class="font-medium text-sm"></span>
+                    </div>
+                </template>
+            </div>
+        </div>
+
+        <template x-for="(section, index) in sections" :key="section.section_id">
+            <div class="relative"
+                 x-show="activeTab == index">
+               
+                 <div class="absolute z-[3] right-0 top-[-20px] lg:top-[-25px]">
+                   
+                    <div
+                        x-text="`${calculateSectionSelectedQuantity(section)} / ${getSectionQuantityUpperLimit(section)}${getSectionProgressBarSuffix(section) ? ` ${getSectionProgressBarSuffix(section)}` : ''}`"
+                        @click="event.stopPropagation()"
+                        class="sectionProgressBar"
+                        :style="`--ratio: ${calculateSectionSelectedQuantity(section) / getSectionQuantityUpperLimit(section)}`"></div>
+                </div>
+
+                <div x-data="{ groups: section.groups }"
+                     x-html="document.getElementById('groupsTemplate').innerHTML"></div>
+
+                <template x-for="childSection in findChildSections(section, childSections)"
+                          :key="childSection.section_id">
+                    <div class="-mr-4 -mb-4" x-data="{ section: childSection }"
+                         x-html="document.getElementById('sectionTemplate').innerHTML"></div>
+                </template>
+            </div>
+        </template>
+    </div>
+</template>
+
+<template id="readOnlyBlockTemplate">
+    <template x-for="section in readOnlySections" :key="section.section_id">
+        <div class="bg-white rounded-xl p-4 mb-2">
+            <div @click="toggleBlockExpandedStatus(section.name)"
+                 class="flex items-center justify-between cursor-pointer">
+                <div x-text="section.name" class="font-semibold text-base lg:text-lg"></div>
+                <div class="flex items-center justify-between gap-2">
+                    <div
+                        x-text="`1 / 1`"
+                        @click="event.stopPropagation()"
+                        class="sectionProgressBar"
+                        style="--ratio: 1"></div>
+                    <div x-data="{ identifier: section.name }"
+                         x-html="document.getElementById('blockExpandedStatusToggleTemplate').innerHTML"></div>
+                </div>
+            </div>
+            <div x-show="isBlockExpanded(section.name)" class="mt-2 text-sm"
+                 x-text="getFirstComponent(section).description"></div>
+        </div>
+    </template>
+</template>
+
+<template id="warrantyTemplate">
+    <div class="bg-white rounded-xl p-4">
+        <div @click="toggleBlockExpandedStatus('Warranty')"
+             class="flex items-center justify-between cursor-pointer">
+            <div class="font-semibold text-base lg:text-lg">Warranty</div>
+            <div class="flex items-center justify-between gap-2">
+                <div
+                    x-text="`1 / 1`"
+                    @click="event.stopPropagation()"
+                    class="sectionProgressBar"
+                    style="--ratio: 1"></div>
+                <div x-data="{ identifier: 'Warranty' }"
+                     x-html="document.getElementById('blockExpandedStatusToggleTemplate').innerHTML"></div>
+            </div>
+        </div>
+
+        <div x-show="isBlockExpanded('Warranty')">
+            <div class="my-4 text-sm">
+                DiGiCOR has an exclusive partner network in regional areas of Australia, if your system will be
+                located
+                in the regional area, please choose one of the options below, then click “Get a Quote” button,
+                specify
+                the
+                post code and warranty type under “Required Information”, we will submit a quotation with the
+                support
+                cost
+                for your region.
+            </div>
+
+            <template x-for="warranty in $store.BomStore.bom.warranties" :key="warranty.warranty_id">
+                <div class="mb-4">
+                    <div x-text="warranty.name" class="font-semibold my-2"></div>
+                    <div class="flex gap-2 items-center">
+                        <input type="radio"
+                               :name="'warranty'"
+                               class="cursor-pointer"
+                               :id="'warranty_' + warranty.warranty_id"
+                               :value="warranty.sku"
+                               x-model="$store.BomStore.bom.warranty_sku">
+                        <div>
+                            <label x-text="warranty.description" :for="'warranty_' + warranty.warranty_id"
+                                   class="cursor-pointer text-sm"></label>
+                            <span class="bomDebug" x-text="`Percentage: ${warranty.percentage}`"></span>
+                        </div>
+                    </div>
+                </div>
+            </template>
+        </div>
+    </div>
+</template>
+
+<template id="blockExpandedStatusToggleTemplate">
+    <div x-data="{ identifier: identifier }"
+         :class="{ 'rotate-90': isBlockExpanded(identifier) }"
+         class="relative h-6 w-6 flex items-center justify-center rounded-full text-gray-400 cursor-pointer">
+
+        <svg fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" class="size-4">
+            <path stroke-linecap="round" stroke-linejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5"/>
+        </svg>
+
+    </div>
+</template>
+
+<template id="expandAllBlocksTemplate">
+    <div class="flex justify-end">
+        <div @click="toggleAllBlocksExpandedStatus()"
+             x-text="allBlocksExpandedStatus ? 'Collapse all sections' : 'Expand all sections'"
+             class="mb-2 mt-[-3px] cursor-pointer inline-block text-blue-500 font-medium ml-auto">
+        </div>
+    </div>
+</template>
+
+<template id="pcieSlotsUsages">
+    <div class="flex flex-col gap-1 mt-2">
+        <div class="pl-[1px] text-xs text-gray-600 font-medium">
+            PCIE Slot Usage Indicator
+        </div>
+        <div class="flex gap-2">
+            <template x-for="(formFactor, formFactorIndex) in [PCIE_FORM_FACTOR_LP, PCIE_FORM_FACTOR_FH]"
+                      :key="formFactor">
+                <div class="flex flex-col gap-1">
+                    <template x-for="(usage, index) in pcieSlotUsages.filter(u => u.formFactor === formFactor)"
+                              :key="usage.name">
+                        <div class="relative">
+                            <div x-data="{ showComponents: false }"
+                                 @mouseenter="showComponents = true"
+                                 @mouseleave="showComponents = false">
+                                <div
+                                    x-text="`${usage.used} / ${usage.max} ${usage.name}`"
+                                    @click="event.stopPropagation()"
+                                    class="sectionProgressBar cursor-default"
+                                    :style="`--ratio: ${usage.used / usage.max}`"></div>
+
+                                <div x-show="showComponents && usage.components.length > 0"
+                                     :class="formFactor === PCIE_FORM_FACTOR_LP ? 'left-0' : 'right-0'"
+                                     class="absolute z-[4] top-[100%] w-[330px] lg:w-[500px]">
+                                    <table
+                                        class="min-w-full divide-y divide-gray-300 text-left text-xs shadow-lg ring-1 ring-black ring-opacity-5 rounded-md bg-white">
+                                        <thead class="bg-gray-50 text-gray-900">
+                                        <tr>
+                                            <th scope="col" class="py-1 px-1 rounded-tl-md">Name</th>
+                                            <th scope="col" class="py-1 px-1 w-[34px]">QTY</th>
+                                            <th scope="col" class="py-1 px-1 w-[40px]">Form</th>
+                                            <th scope="col" class="py-1 px-1 w-[47px]">Speed</th>
+                                            <th scope="col" class="py-1 px-1 w-[45px] rounded-tr-md">Slot</th>
+                                        </tr>
+                                        </thead>
+                                        <tbody class="divide-y divide-gray-200 text-gray-500">
+                                        <template x-for="component in usage.components" :key="component.sku">
+                                            <tr>
+                                                <td class="py-1 px-1 text-gray-900"><span
+                                                        x-text="component.description"></span></td>
+                                                <td class="py-1 px-1"><span x-text="component.quantity"></span></td>
+                                                <td class="py-1 px-1"><span
+                                                        x-text="component.pcieFormFactor"></span>
+                                                </td>
+                                                <td class="py-1 px-1"><span x-text="component.pcieSpeed"></span>
+                                                </td>
+                                                <td class="py-1 px-1"><span x-text="component.pcieSlotWidth"></span>
+                                                </td>
+                                            </tr>
+                                        </template>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    </template>
+                </div>
+            </template>
+        </div>
+    </div>
+</template>
+
+<?php if ($isProduction): ?>
+    <style>
+        :root {
+            --bomDebug-display: none;
+        }
+    </style>
+<?php else: ?>
+    <style>
+        :root {
+            --bomDebug-display: <?= $isInAdmin ? 'none' : 'block' ?>;
+        }
+    </style>
+<?php endif; ?>
+
+
+<style>
+    *{
+      font-family: Heebo, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji"!important;
+    }
+    label{
+      color: rgb(31 41 55 / var(--tw-text-opacity));
+
+    }
+    .bomDebug {
+        display: var(--bomDebug-display) !important;
+        background-color: #FDF9C9 !important;
+        color: #7E501F;
+        font-size: 12px;
+        font-weight: bold;
+    }
+
+    .bomDebugButton, .vc-switch {
+        background-color: #FDF9C9 !important;
+        color: #7E501F;
+        position: fixed !important;
+        left: 6px !important;
+        font-size: 12px !important;
+        font-weight: bold !important;
+        padding: 4px 8px !important;
+        border-radius: 4px !important;
+        z-index: 9999 !important;
+        width: 110px !important;
+        height: 30px !important;
+        display: flex !important;
+        justify-content: center !important;
+        align-items: center !important;
+        box-shadow: 0 0 10px rgba(0, 0, 0, 0.4) !important;
+        cursor: pointer !important;
+    }
+
+    .bomDebugButton {
+        bottom: 42px !important;
+    }
+
+    .vc-switch {
+        bottom: 6px !important;
+    }
+
+    @media (max-width: 1023px) {
+        .bomDebugButton {
+            bottom: 98px !important;
+        }
+
+        .vc-switch {
+            bottom: 62px !important;
+        }
+    }
+
+    .sectionProgressBar {
+        width: 160px;
+        height: 18px;
+        line-height: 18px;
+        font-size: 12px;
+        color: white;
+        text-align: center;
+        border-radius: 0.25rem;
+        background: linear-gradient(90deg, #4E81EE calc(var(--ratio) * 100%), #9EA3AE 0);
+    }
+    .text-green-500 {
+        --tw-text-opacity: 1;
+        color: rgb(34 197 94 / var(--tw-text-opacity));
+    }
+    .text-red-500 {
+        --tw-text-opacity: 1;
+        color: red
+    }
+    @media screen  and (max-width: 768px) {
+       .sectionProgressBar{
+        width:140px;
+       } 
+    }
+</style>
+
