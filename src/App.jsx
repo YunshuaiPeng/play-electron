@@ -1,15 +1,21 @@
-import React from 'react'
-import { Button } from '@fluentui/react-components'
+import React from 'react';
+import { FluentProvider, webLightTheme } from '@fluentui/react-components';
+import { Outlet } from 'react-router-dom';
+import Sidebar from './components/Sidebar';
 
 function App() {
   return (
-    <div className="flex justify-center items-center h-screen">
-      <div className="text-center">
-        <h1 className="text-2xl mb-4">你好，Electron！</h1>
-        <Button appearance="primary">Fluent UI Button</Button>
+    <FluentProvider theme={webLightTheme}>
+      <div className="flex h-screen">
+        <Sidebar />
+        <main className="flex-1 overflow-auto bg-gray-50">
+          <div className="max-w-5xl mx-auto">
+            <Outlet />
+          </div>
+        </main>
       </div>
-    </div>
-  )
+    </FluentProvider>
+  );
 }
 
-export default App 
+export default App; 

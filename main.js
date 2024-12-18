@@ -11,14 +11,13 @@ function createWindow() {
     }
   })
 
-  // Load different content based on environment
+  // 在开发环境中加载 Vite 开发服务器
   if (process.env.NODE_ENV === 'development') {
-    // Development: Connect to Vite dev server
     win.loadURL('http://localhost:5173')
-    // Open dev tools
+    // 打开开发工具
     win.webContents.openDevTools()
   } else {
-    // Production: Load built files
+    // 在生产环境中加载打包后的文件
     win.loadFile(path.join(__dirname, 'dist/index.html'))
   }
 }
