@@ -1,78 +1,47 @@
-name: Build and Release Electron App
+name: Build and Release
 
 on:
   push:
-    tags:
-      - 'v*'
-
-# 添加权限配置
-permissions:
-  contents: write # 这给予了创建 release 的权限
-  packages: write
-  issues: write
-  pull-requests: write
+    branches:
+      - main  # 或者是您的主分支名称
 
 jobs:
   build:
-    name: Build (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    
     strategy:
       matrix:
         os: [macos-latest, windows-latest]
-
-    steps:
-    - uses: actions/checkout@v4
-    
-    - name: Setup Node.js
-      uses: actions/setup-node@v4
-      with:
-        node-version: '18'
-        cache: 'npm'
-
-    - name: Install dependencies
-      run: npm install
-
-    - name: Build Web App
-      run: npm run build:web
-
-    - name: Build Electron app
-      run: npm run build
-      
-    - name: Prepare Release Files
-      run: |
-        mkdir release-files
-        if [ "${{ matrix.os }}" = "macos-latest" ]; then
-          cp dist/*.dmg release-files/ || true
-          cp dist/*.zip release-files/ || true
-        else
-          cp dist/*.exe release-files/ || true
-        fi
-      shell: bash
-
-    - name: Upload artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: ${{ matrix.os }}-build
-        path: release-files
         
-  release:
-    needs: build
-    runs-on: ubuntu-latest
-    
     steps:
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
-          path: artifacts
+          node-version: '18'
           
-      - name: Display structure of downloaded files
-        run: ls -R artifacts
-          
+      - name: Install dependencies
+        run: npm ci
+        
+      - name: Build web
+        run: npm run web:build
+        
+      - name: Build electron app
+        run: npm run electron:build
+        
       - name: Create Release
-        uses: ncipollo/release-action@v1
+        uses: softprops/action-gh-release@v1
         with:
-          artifacts: "artifacts/**/*"
-          token: ${{ secrets.GITHUB_TOKEN }}
+          files: |
+            dist_electron/*.exe
+            dist_electron/*.dmg
+            dist_electron/*.zip
+          name: Release ${{ github.sha }}
+          tag_name: release-${{ github.sha }}
           draft: false
           prerelease: false
-          generateReleaseNotes: true
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
