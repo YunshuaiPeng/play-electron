@@ -35,14 +35,8 @@
     "mac": {
       "category": "public.app-category.utilities",
       "target": [
-        "dmg",
         "zip"
-      ],
-      "hardenedRuntime": true,
-      "gatekeeperAssess": false,
-      "entitlements": "build/entitlements.mac.plist",
-      "entitlementsInherit": "build/entitlements.mac.plist",
-      "identity": null
+      ]
     },
     "win": {
       "target": [
