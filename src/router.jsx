@@ -1,5 +1,5 @@
 import React from 'react';
-import { createBrowserRouter } from 'react-router-dom';
+import { createHashRouter } from 'react-router-dom';
 import App from './App';
 import Home from './pages/Home';
 import System from './pages/System';
@@ -14,7 +14,7 @@ import Accessibility from './pages/Accessibility';
 import Privacy from './pages/Privacy';
 import Update from './pages/Update';
 
-const router = createBrowserRouter([
+const router = createHashRouter([
   {
     path: '/',
     element: <App />,
@@ -24,47 +24,47 @@ const router = createBrowserRouter([
         element: <Home />,
       },
       {
-        path: '/system',
+        path: 'system',
         element: <System />,
       },
       {
-        path: '/bluetooth',
+        path: 'bluetooth',
         element: <Bluetooth />,
       },
       {
-        path: '/network',
+        path: 'network',
         element: <Network />,
       },
       {
-        path: '/personalization',
+        path: 'personalization',
         element: <Personalization />,
       },
       {
-        path: '/apps',
+        path: 'apps',
         element: <Apps />,
       },
       {
-        path: '/account',
+        path: 'account',
         element: <Account />,
       },
       {
-        path: '/time',
+        path: 'time',
         element: <Time />,
       },
       {
-        path: '/gaming',
+        path: 'gaming',
         element: <Gaming />,
       },
       {
-        path: '/accessibility',
+        path: 'accessibility',
         element: <Accessibility />,
       },
       {
-        path: '/privacy',
+        path: 'privacy',
         element: <Privacy />,
       },
       {
-        path: '/update',
+        path: 'update',
         element: <Update />,
       },
     ],
