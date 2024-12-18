@@ -32,9 +32,7 @@ jobs:
     - name: Install dependencies
       run: npm install
 
-    - name: Build/release Electron app
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    - name: Build Electron app
       run: npm run build
       
     - name: Prepare Release Files
@@ -54,23 +52,24 @@ jobs:
         name: ${{ matrix.os }}-build
         path: release-files
         
-  create-release:
+  release:
     needs: build
     runs-on: ubuntu-latest
-    permissions:
-      contents: write # 在这个任务中也明确指定权限
+    
     steps:
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
           
+      - name: Display structure of downloaded files
+        run: ls -R artifacts
+          
       - name: Create Release
-        uses: softprops/action-gh-release@v1
+        uses: ncipollo/release-action@v1
         with:
-          files: artifacts/**/*
+          artifacts: "artifacts/**/*"
+          token: ${{ secrets.GITHUB_TOKEN }}
           draft: false
           prerelease: false
-          generate_release_notes: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          generateReleaseNotes: true
