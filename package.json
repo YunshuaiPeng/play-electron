@@ -1,6 +1,6 @@
 {
   "name": "electron",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "hello",
   "main": "main.js",
   "scripts": {
@@ -22,7 +22,12 @@
       "target": [
         "dmg",
         "zip"
-      ]
+      ],
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist",
+      "identity": null
     },
     "win": {
       "target": [
