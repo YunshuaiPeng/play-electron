@@ -3,7 +3,14 @@ name: Build and Release Electron App
 on:
   push:
     tags:
-      - 'v*' # 当推送 v 开头的标签时触发，如 v1.0.0
+      - 'v*'
+
+# 添加权限配置
+permissions:
+  contents: write # 这给予了创建 release 的权限
+  packages: write
+  issues: write
+  pull-requests: write
 
 jobs:
   build:
@@ -50,6 +57,8 @@ jobs:
   create-release:
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      contents: write # 在这个任务中也明确指定权限
     steps:
       - name: Download all artifacts
         uses: actions/download-artifact@v4
