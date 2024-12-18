@@ -3,20 +3,18 @@
   "version": "1.0.4",
   "description": "hello",
   "main": "main.js",
-  "scripts": {
-    "start": "electron .",
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "build": "electron-builder --publish never",
-    "dev": "vite",
-    "build:web": "vite build",
-    "preview": "vite preview",
-    "dev:electron": "cross-env NODE_ENV=development electron .",
-    "start:electron": "npm run build:web && electron ."
-  },
   "author": "hello",
   "license": "ISC",
+  "scripts": {
+    "web:dev": "vite",
+    "web:build": "vite build",
+    "web:preview": "vite preview",
+    "electron:dev": "cross-env NODE_ENV=development electron .",
+    "electron:build": "electron-builder --publish never",
+    "electron:start": "npm run web:build && electron ."
+  },
   "devDependencies": {
-    "@vitejs/plugin-vue": "^5.0.0",
+    "@vitejs/plugin-react": "^4.3.4",
     "autoprefixer": "^10.4.16",
     "cross-env": "^7.0.3",
     "electron": "^33.2.1",
@@ -26,8 +24,10 @@
     "vite": "^5.0.10"
   },
   "dependencies": {
-    "vue": "^3.3.13",
-    "vue-router": "^4.5.0"
+    "@fluentui/react-components": "^9.56.7",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.28.0"
   },
   "build": {
     "appId": "test.yunshuai",

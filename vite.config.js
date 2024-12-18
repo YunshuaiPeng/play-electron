@@ -1,17 +1,7 @@
 import { defineConfig } from 'vite'
-import vue from '@vitejs/plugin-vue'
-import path from 'path'
+import react from '@vitejs/plugin-react'
 
 export default defineConfig({
-  plugins: [vue()],
-  base: './',
-  build: {
-    outDir: 'dist',
-    assetsDir: '.',
-    rollupOptions: {
-      output: {
-        format: 'es'
-      }
-    }
-  }
+  plugins: [react()],
+  base: './'
 }) 
