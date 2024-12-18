@@ -5,17 +5,6 @@ import BomDetail from './views/BomDetail.vue'
 const router = createRouter({
   history: createWebHashHistory(),
   routes: [
-    {
-      path: '/',
-      name: 'home',
-      component: BomList
-    },
-    {
-      path: '/bom/:filename',
-      name: 'bomDetail',
-      component: BomDetail,
-      props: true
-    }
   ]
 })
 
